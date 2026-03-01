@@ -1,0 +1,13 @@
+﻿<Window x:Class="ShapeEditor.ShapeParamsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Параметры фигуры" Height="500" Width="600"
+        WindowStartupLocation="CenterOwner"
+        Background="#F0F0F0"
+        FontFamily="Segoe UI" FontSize="12">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="10">
+        <StackPanel x:Name="Panel" Margin="20,10,10,20">
+            <!-- Сюда динамически добавляются строки сторон -->
+        </StackPanel>
+    </ScrollViewer>
+</Window>
