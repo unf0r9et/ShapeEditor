@@ -242,9 +242,9 @@ namespace ShapeEditor
                     _paramsShowButton = new Button
                     {
                         Content = "Параметры фигуры",
-                        Margin = new Thickness(0, 12, 0, 12),
-                        Padding = new Thickness(0, 10, 0, 10),
-                        FontSize = 14,
+                        Margin = new Thickness(0, 2, 0, 2),
+                        Padding = new Thickness(0, 0, 0, 0),
+                        FontSize = 16,
                         FontWeight = FontWeights.SemiBold
                     };
                     _paramsShowButton.Click += ParamsShowButton_Click;
@@ -289,12 +289,12 @@ namespace ShapeEditor
             {
                 string label = isCircle ? "Окружность" : (i < names.Length ? names[i] : $"Сторона {i + 1}");
 
-                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
 
                 row.Children.Add(new TextBlock
                 {
                     Text = label + ":",
-                    Width = 120,
+                    Width = 110,
                     VerticalAlignment = VerticalAlignment.Center,
                     FontWeight = FontWeights.SemiBold
                 });
@@ -302,30 +302,37 @@ namespace ShapeEditor
                 var colorTb = new TextBox
                 {
                     IsReadOnly = true,
-                    Width = 92,
-                    Margin = new Thickness(8, 0, 0, 0),
+                    Width = 90,
+                    Margin = new Thickness(6, 0, 0, 0),          // уменьшено
                     Text = GetColorHex(i < _currentShape.SideColors.Count ? _currentShape.SideColors[i] : Brushes.Black)
                 };
                 _colorTextBoxes.Add(colorTb);
 
                 var swatch = new Border
                 {
-                    Width = 26,
-                    Height = 26,
-                    Margin = new Thickness(6, 0, 8, 0),
+                    Width = 24,
+                    Height = 24,
+                    Margin = new Thickness(4, 0, 4, 0),          // уменьшено
                     Background = i < _currentShape.SideColors.Count ? _currentShape.SideColors[i] : Brushes.Black,
                     BorderBrush = Brushes.Gray,
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(4),
+                    CornerRadius = new CornerRadius(3),
                     Cursor = Cursors.Hand,
                     Tag = i
                 };
                 swatch.MouseLeftButtonDown += ColorSwatch_MouseDown;
                 _colorSwatches.Add(swatch);
 
+                var thickLabel = new TextBlock
+                {
+                    Text = "толщина",
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(8, 0, 4, 0)           // уменьшено
+                };
+
                 var thickTb = new TextBox
                 {
-                    Width = 55,
+                    Width = 30,
                     Margin = new Thickness(4, 0, 0, 0),
                     Text = i < _currentShape.SideThickness.Count ? _currentShape.SideThickness[i].ToString("0.#") : "3",
                     Tag = i
@@ -335,18 +342,18 @@ namespace ShapeEditor
 
                 row.Children.Add(colorTb);
                 row.Children.Add(swatch);
-                row.Children.Add(new TextBlock { Text = "толщина", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 4, 0) });
+                row.Children.Add(thickLabel);
                 row.Children.Add(thickTb);
 
                 _paramsStackPanel.Children.Add(row);
             }
 
             // Заливка
-            var fillRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 16) };
+            var fillRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 12) };
             fillRow.Children.Add(new TextBlock
             {
                 Text = "Заливка:",
-                Width = 120,
+                Width = 110,
                 VerticalAlignment = VerticalAlignment.Center,
                 FontWeight = FontWeights.SemiBold
             });
@@ -354,20 +361,20 @@ namespace ShapeEditor
             _fillTextBox = new TextBox
             {
                 IsReadOnly = true,
-                Width = 92,
-                Margin = new Thickness(8, 0, 0, 0),
+                Width = 80,
+                Margin = new Thickness(6, 0, 0, 0),
                 Text = GetColorHex(_currentShape.Fill ?? Brushes.Transparent)
             };
 
             _fillSwatch = new Border
             {
-                Width = 26,
-                Height = 26,
-                Margin = new Thickness(6, 0, 8, 0),
+                Width = 24,
+                Height = 24,
+                Margin = new Thickness(4, 0, 4, 0),
                 Background = _currentShape.Fill ?? Brushes.Transparent,
                 BorderBrush = Brushes.Gray,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
+                CornerRadius = new CornerRadius(3),
                 Cursor = Cursors.Hand
             };
             _fillSwatch.MouseLeftButtonDown += FillSwatch_MouseDown;
@@ -383,19 +390,24 @@ namespace ShapeEditor
                 {
                     Text = "Вершины (X, Y):",
                     FontWeight = FontWeights.Bold,
-                    Margin = new Thickness(0, 20, 0, 10)
+                    Margin = new Thickness(0, 14, 0, 6)
                 });
 
                 for (int i = 0; i < sides; i++)
                 {
-                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
 
-                    row.Children.Add(new TextBlock { Text = $"V{i + 1}:", Width = 40, VerticalAlignment = VerticalAlignment.Center });
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = $"V{i + 1}:",
+                        Width = 35,
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
 
                     var xTb = new TextBox
                     {
-                        Width = 80,
-                        Margin = new Thickness(8, 0, 8, 0),
+                        Width = 50,
+                        Margin = new Thickness(6, 0, 6, 0),
                         Text = _currentShape.Vertices[i].X.ToString("0"),
                         Tag = i
                     };
@@ -404,7 +416,8 @@ namespace ShapeEditor
 
                     var yTb = new TextBox
                     {
-                        Width = 80,
+                        Width = 50,
+                        Margin = new Thickness(0, 0, 0, 0),
                         Text = _currentShape.Vertices[i].Y.ToString("0"),
                         Tag = i
                     };
@@ -422,75 +435,88 @@ namespace ShapeEditor
             {
                 Text = "Точка привязки",
                 FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, 20, 0, 8)
+                Margin = new Thickness(0, 16, 0, 6)
             });
 
-            var localRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
-            localRow.Children.Add(new TextBlock { Text = "Локальная:", Width = 90, VerticalAlignment = VerticalAlignment.Center });
+            var localRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            localRow.Children.Add(new TextBlock { Text = "Локальная:", Width = 85, VerticalAlignment = VerticalAlignment.Center });
 
             _localAnchorXBox = new TextBox
             {
-                Width = 80,
-                Margin = new Thickness(8, 0, 4, 0),
+                Width = 50,
+                Margin = new Thickness(6, 0, 4, 0),
                 Text = _currentShape.AnchorPoint.X.ToString("0")
             };
             _localAnchorXBox.TextChanged += LocalAnchorX_TextChanged;
 
             _localAnchorYBox = new TextBox
             {
-                Width = 80,
+                Width = 50,
+                Margin = new Thickness(0, 0, 0, 0),
                 Text = _currentShape.AnchorPoint.Y.ToString("0")
             };
             _localAnchorYBox.TextChanged += LocalAnchorY_TextChanged;
 
             localRow.Children.Add(_localAnchorXBox);
-            localRow.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(4, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+            localRow.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(4, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center });
             localRow.Children.Add(_localAnchorYBox);
             _paramsStackPanel.Children.Add(localRow);
 
+            // Мировая точка привязки (теперь редактируемая)
             Point world = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
-            var worldRow = new StackPanel { Orientation = Orientation.Horizontal };
-            worldRow.Children.Add(new TextBlock { Text = "Мировая:", Width = 90, VerticalAlignment = VerticalAlignment.Center });
+            var worldRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            worldRow.Children.Add(new TextBlock { Text = "Мировая:", Width = 85, VerticalAlignment = VerticalAlignment.Center });
 
             _worldAnchorXBox = new TextBox
             {
-                Width = 80,
-                Margin = new Thickness(8, 0, 4, 0),
+                Width = 50,
+                Margin = new Thickness(6, 0, 4, 0),
                 Text = world.X.ToString("0"),
-                IsReadOnly = true,
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0)
+                IsReadOnly = false,                       // ← теперь можно редактировать
+                Background = Brushes.White,               // чтобы было видно, что редактируемо
+                BorderBrush = Brushes.Gray
             };
+            _worldAnchorXBox.TextChanged += WorldAnchorX_TextChanged;   // ← новый обработчик
 
             _worldAnchorYBox = new TextBox
             {
-                Width = 80,
+                Width = 50,
+                Margin = new Thickness(0, 0, 0, 0),
                 Text = world.Y.ToString("0"),
-                IsReadOnly = true,
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0)
+                IsReadOnly = false,
+                Background = Brushes.White,
+                BorderBrush = Brushes.Gray
             };
+            _worldAnchorYBox.TextChanged += WorldAnchorY_TextChanged;   // ← новый обработчик
+
 
             worldRow.Children.Add(_worldAnchorXBox);
-            worldRow.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(4, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+            worldRow.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(4, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center });
             worldRow.Children.Add(_worldAnchorYBox);
             _paramsStackPanel.Children.Add(worldRow);
 
-            // Масштаб и угол
+            // Масштаб и угол — уменьшенные горизонтальные отступы
             _paramsStackPanel.Children.Add(new TextBlock
             {
                 Text = "Масштаб и поворот",
                 FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, 24, 0, 8)
+                Margin = new Thickness(0, 8, 0, 6)
             });
 
-            var scalePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
-            scalePanel.Children.Add(new TextBlock { Text = "Масштаб" });
+            // Масштаб
+            var scalePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            scalePanel.Children.Add(new TextBlock { Text = "Масштаб", Margin = new Thickness(0, 0, 0, 2) });
+
             var scaleGrid = new Grid();
             scaleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             scaleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            _scaleSlider = new Slider { Minimum = 0.1, Maximum = 30, Value = _currentShape.Scale };
+            _scaleSlider = new Slider
+            {
+                Minimum = 0.1,
+                Maximum = 30,
+                Value = _currentShape.Scale
+            };
             _scaleSlider.ValueChanged += (s, ev) =>
             {
                 _currentShape.Scale = ev.NewValue;
@@ -500,9 +526,10 @@ namespace ShapeEditor
 
             _scaleTextBox = new TextBox
             {
-                Width = 70,
-                Margin = new Thickness(12, 0, 0, 0),
-                Text = _currentShape.Scale.ToString("0.00")
+                Width = 30,
+                Margin = new Thickness(6, 0, 0, 0),          // ← здесь главное уменьшение: было 12 → стало 8
+                Text = _currentShape.Scale.ToString("0.00"),
+                VerticalAlignment = VerticalAlignment.Center
             };
             _scaleTextBox.TextChanged += (s, ev) =>
             {
@@ -521,13 +548,21 @@ namespace ShapeEditor
             scalePanel.Children.Add(scaleGrid);
             _paramsStackPanel.Children.Add(scalePanel);
 
-            var anglePanel = new StackPanel();
-            anglePanel.Children.Add(new TextBlock { Text = "Угол поворота (°)" });
+            // Угол
+            var anglePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 0) };
+            anglePanel.Children.Add(new TextBlock { Text = "Угол поворота (°)", Margin = new Thickness(0, 0, 0, 2) });
+
             var angleGrid = new Grid();
             angleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             angleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            _angleSlider = new Slider { Minimum = -180, Maximum = 180, Value = _currentShape.Angle, TickFrequency = 15 };
+            _angleSlider = new Slider
+            {
+                Minimum = -180,
+                Maximum = 180,
+                Value = _currentShape.Angle,
+                TickFrequency = 15
+            };
             _angleSlider.ValueChanged += (s, ev) =>
             {
                 _currentShape.Angle = ev.NewValue;
@@ -537,9 +572,10 @@ namespace ShapeEditor
 
             _angleTextBox = new TextBox
             {
-                Width = 70,
-                Margin = new Thickness(12, 0, 0, 0),
-                Text = ((int)_currentShape.Angle).ToString()
+                Width = 30,
+                Margin = new Thickness(6, 0, 0, 0),          // ← здесь главное уменьшение: было 12 → стало 8
+                Text = ((int)_currentShape.Angle).ToString(),
+                VerticalAlignment = VerticalAlignment.Center
             };
             _angleTextBox.TextChanged += (s, ev) =>
             {
@@ -669,6 +705,54 @@ namespace ShapeEditor
             _currentShape.AnchorPoint = p;
             RedrawPreservingAnchor();
         }
+
+
+
+        private void WorldAnchorX_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender is not TextBox tb || _currentShape == null || _currentShapeVisual == null) return;
+
+            if (double.TryParse(tb.Text, out double newWorldX))
+            {
+                // Текущая мировая позиция якоря
+                Point currentWorld = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+
+                // На сколько нужно сдвинуть Canvas по X
+                double deltaX = newWorldX - currentWorld.X;
+
+                // Перемещаем Canvas
+                double currentLeft = Canvas.GetLeft(_currentShapeVisual);
+                Canvas.SetLeft(_currentShapeVisual, currentLeft + deltaX);
+
+                // Перемещаем bounding box, если он есть
+                if (_boundingBoxVisual != null && _selectedShapeVisual == _currentShapeVisual)
+                    Canvas.SetLeft(_boundingBoxVisual, Canvas.GetLeft(_boundingBoxVisual) + deltaX);
+
+                // Обновляем отображение (на случай округления)
+                tb.Text = newWorldX.ToString("0");
+            }
+        }
+
+        private void WorldAnchorY_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender is not TextBox tb || _currentShape == null || _currentShapeVisual == null) return;
+
+            if (double.TryParse(tb.Text, out double newWorldY))
+            {
+                Point currentWorld = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+                double deltaY = newWorldY - currentWorld.Y;
+
+                double currentTop = Canvas.GetTop(_currentShapeVisual);
+                Canvas.SetTop(_currentShapeVisual, currentTop + deltaY);
+
+                if (_boundingBoxVisual != null && _selectedShapeVisual == _currentShapeVisual)
+                    Canvas.SetTop(_boundingBoxVisual, Canvas.GetTop(_boundingBoxVisual) + deltaY);
+
+                tb.Text = newWorldY.ToString("0");
+            }
+        }
+
+
 
         // ────────────────────────────────────────────────
         // Перетаскивание фигур и якоря (без изменений)

@@ -12,7 +12,7 @@
     <Grid>
         <!-- 🔥 ColumnDefinitions должны быть ПЕРВЫМИ в Grid! -->
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="380" />
+            <ColumnDefinition Width="420" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -44,11 +44,10 @@
                 <Border DockPanel.Dock="Top"
                         Background="{DynamicResource PrimaryHueMidBrush}"
                         Padding="0,15,0,15">
-                    <TextBlock Text="🔷 ФИГУРЫ"
-                               FontWeight="Bold"
-                               FontSize="16"
-                               Foreground="White"
-                               HorizontalAlignment="Center" />
+                    <TextBlock Text="ФИГУРЫ"
+                               FontSize="20"
+                               Foreground="Black"
+                               HorizontalAlignment="Center" FontWeight="Bold" />
                 </Border>
 
                 <!-- Кнопки добавления фигур -->
@@ -60,7 +59,7 @@
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource MaterialDesignBody}"
                                    Margin="0,0,0,12"
-                                   FontSize="14"/>
+                                   FontSize="18"/>
 
                         <Button Style="{StaticResource MaterialDesignOutlinedButton}"
                                 BorderBrush="{DynamicResource PrimaryHueMidBrush}"
@@ -69,7 +68,7 @@
                                 Height="42"
                                 Click="AddRectangle">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                <TextBlock Text="Прямоугольник" VerticalAlignment="Center" FontSize="13"/>
+                                <TextBlock Text="Прямоугольник" VerticalAlignment="Center" FontSize="16"/>
                             </StackPanel>
                         </Button>
 
@@ -80,7 +79,7 @@
                                 Height="42"
                                 Click="AddTriangle">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                <TextBlock Text="Треугольник" VerticalAlignment="Center" FontSize="13"/>
+                                <TextBlock Text="Треугольник" VerticalAlignment="Center" FontSize="16"/>
                             </StackPanel>
                         </Button>
 
@@ -91,7 +90,7 @@
                                 Height="42"
                                 Click="AddTrapezoid">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                <TextBlock Text="Трапеция" VerticalAlignment="Center" FontSize="13"/>
+                                <TextBlock Text="Трапеция" VerticalAlignment="Center" FontSize="16"/>
                             </StackPanel>
                         </Button>
 
@@ -102,7 +101,7 @@
                                 Height="42"
                                 Click="AddCircle">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                <TextBlock Text="Окружность" VerticalAlignment="Center" FontSize="13"/>
+                                <TextBlock Text="Окружность" VerticalAlignment="Center" FontSize="16"/>
                             </StackPanel>
                         </Button>
 
@@ -113,7 +112,7 @@
                                 Height="42"
                                 Click="AddHexagon">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                <TextBlock Text="Шестиугольник" VerticalAlignment="Center" FontSize="13"/>
+                                <TextBlock Text="Шестиугольник" VerticalAlignment="Center" FontSize="16"/>
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -126,7 +125,7 @@
         Background="{DynamicResource MaterialDesignCardBackground}"
         BorderBrush="{DynamicResource MaterialDesignDivider}"
         BorderThickness="0,1,0,0"
-        Padding="0"
+        Padding="10"
         MinHeight="100"
         Visibility="Collapsed">
 
