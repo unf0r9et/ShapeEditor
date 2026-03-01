@@ -6,36 +6,58 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
+using Drawing = System.Drawing;
+
 namespace ShapeEditor
 {
     public partial class MainWindow : Window
     {
-        // === Перетаскивание всей фигуры ===
+        // Перетаскивание всей фигуры
         private bool potentialDrag;
         private Point startMouse;
         private Canvas draggedShapeCanvas;
         private double startLeft;
         private double startTop;
 
-        // === Перетаскивание якоря (оригинальные имена, как в вашем коде) ===
+        // Перетаскивание якоря
         private bool draggingAnchor;
-        private Point dragStartWorld;          // ← одно объявление!
+        private Point dragStartWorld;
         private Point originalAnchorPos;
-        private Canvas anchorDragCanvas;       // ← одно объявление, без подчёркивания!
+        private Canvas anchorDragCanvas;
 
-        // === Текущая фигура и окно параметров ===
+        // Текущая фигура и визуал
         private ShapeBase _currentShape;
         private Canvas _currentShapeVisual;
-        private ShapeParamsWindow _currentParamsWindow;
-
-        // === Коллекции всех фигур на холсте ===
-        private List<ShapeBase> _allShapes = new();
-        private List<Canvas> _allShapeVisuals = new();
         private Canvas _selectedShapeVisual;
         private Rectangle _boundingBoxVisual;
 
-        // === Флаги ===
+        private List<ShapeBase> _allShapes = new();
+        private List<Canvas> _allShapeVisuals = new();
+
         private bool _isProcessingMove;
+
+        // Панель параметров
+        private Button _paramsShowButton;
+        private StackPanel _paramsStackPanel;
+        private bool _paramsPanelIsOpen = false;
+
+        // Ссылки на динамические элементы (обновляются при каждой перестройке)
+        private List<TextBox> _colorTextBoxes = new();
+        private List<Border> _colorSwatches = new();
+        private List<TextBox> _thicknessTextBoxes = new();
+        private Border _fillSwatch;
+        private TextBox _fillTextBox;
+
+        private List<TextBox> _vertexXBoxes = new();
+        private List<TextBox> _vertexYBoxes = new();
+
+        private TextBox _localAnchorXBox, _localAnchorYBox;
+        private TextBox _worldAnchorXBox, _worldAnchorYBox;
+
+        private Slider _scaleSlider;
+        private TextBox _scaleTextBox;
+        private Slider _angleSlider;
+        private TextBox _angleTextBox;
 
         public MainWindow()
         {
@@ -49,37 +71,36 @@ namespace ShapeEditor
         private void AddCircle(object sender, RoutedEventArgs e) => AddShape(new CircleShape());
         private void AddHexagon(object sender, RoutedEventArgs e) => AddShape(new HexagonShape());
 
-        // Новый метод: снятие выделения при клике на пустое место
         private void DrawCanvas_BackgroundClick(object sender, MouseButtonEventArgs e)
         {
-            // Проверяем, что клик был именно по Canvas, а не по фигуре внутри
             if (e.OriginalSource == DrawCanvas)
-            {
-                // Снимаем выделение
-                if (_boundingBoxVisual != null)
-                    DrawCanvas.Children.Remove(_boundingBoxVisual);
-                _boundingBoxVisual = null;
-                _selectedShapeVisual = null;
-
-                // Сбрасываем текущую фигуру (но не удаляем её!)
-                _currentShape = null;
-                _currentShapeVisual = null;
-            }
+                ClearSelection();
         }
+
+        private void ClearSelection()
+        {
+            if (_boundingBoxVisual != null)
+                DrawCanvas.Children.Remove(_boundingBoxVisual);
+
+            _boundingBoxVisual = null;
+            _selectedShapeVisual = null;
+            _currentShape = null;
+            _currentShapeVisual = null;
+
+            UpdateParamsPanelVisibility();
+        }
+
         private void AddShape(ShapeBase shapeBase)
         {
             DrawCanvas.UpdateLayout();
+            Point worldAnchor = new(DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
 
-            Point worldAnchor = new(
-                DrawCanvas.ActualWidth / 2,
-                DrawCanvas.ActualHeight / 2);
-
-            // Дефолтные параметры
             shapeBase.Scale = 1.0;
             shapeBase.Angle = 0;
             shapeBase.Fill = Brushes.Transparent;
             shapeBase.SideColors.Clear();
             shapeBase.SideThickness.Clear();
+
             for (int i = 0; i < shapeBase.SidesCount; i++)
             {
                 shapeBase.SideColors.Add(Brushes.Black);
@@ -88,7 +109,6 @@ namespace ShapeEditor
 
             var visual = CreateShapeVisual(shapeBase, worldAnchor.X, worldAnchor.Y);
             DrawCanvas.Children.Add(visual);
-
             _allShapes.Add(shapeBase);
             _allShapeVisuals.Add(visual);
 
@@ -97,11 +117,18 @@ namespace ShapeEditor
 
         private void SelectShape(Canvas shapeVisual)
         {
-            if (_boundingBoxVisual != null)
-                DrawCanvas.Children.Remove(_boundingBoxVisual);
+            ClearSelection();
 
             _selectedShapeVisual = shapeVisual;
+            _currentShape = shapeVisual.Tag as ShapeBase;
+            _currentShapeVisual = shapeVisual;
+
             ShowBoundingBox(shapeVisual);
+            UpdateParamsPanelVisibility();
+
+            // Пересобираем панель параметров под новую фигуру
+            if (_paramsPanelIsOpen)
+                RebuildParamsPanel();
         }
 
         private void ShowBoundingBox(Canvas shapeVisual)
@@ -109,16 +136,10 @@ namespace ShapeEditor
             var shape = shapeVisual.Tag as ShapeBase;
             if (shape == null) return;
 
-            double width = shapeVisual.Width;
-            double height = shapeVisual.Height;
-            double left = Canvas.GetLeft(shapeVisual);
-            double top = Canvas.GetTop(shapeVisual);
-
-            // ← Используем Rectangle вместо Border для поддержки пунктира
             _boundingBoxVisual = new Rectangle
             {
-                Width = width,
-                Height = height,
+                Width = shapeVisual.Width,
+                Height = shapeVisual.Height,
                 Stroke = Brushes.DodgerBlue,
                 StrokeThickness = 1,
                 StrokeDashArray = new DoubleCollection { 4, 2 },
@@ -126,8 +147,8 @@ namespace ShapeEditor
                 IsHitTestVisible = false
             };
 
-            Canvas.SetLeft(_boundingBoxVisual, left);
-            Canvas.SetTop(_boundingBoxVisual, top);
+            Canvas.SetLeft(_boundingBoxVisual, Canvas.GetLeft(shapeVisual));
+            Canvas.SetTop(_boundingBoxVisual, Canvas.GetTop(shapeVisual));
             DrawCanvas.Children.Add(_boundingBoxVisual);
         }
 
@@ -136,12 +157,10 @@ namespace ShapeEditor
             var canvas = shape.Build(anchorWorldX, anchorWorldY);
             canvas.Tag = shape;
 
-            // События для перетаскивания всей фигуры
             canvas.MouseLeftButtonDown += ShapeCanvas_Down;
             canvas.MouseMove += ShapeCanvas_Move;
             canvas.MouseLeftButtonUp += ShapeCanvas_Up;
 
-            // 🔥 Вешаем события ТОЛЬКО на точку привязки (якорь)
             foreach (UIElement child in canvas.Children)
             {
                 if (child is Ellipse ellipse && ellipse.Tag is string tag && tag == "Anchor")
@@ -149,96 +168,547 @@ namespace ShapeEditor
                     ellipse.MouseLeftButtonDown += VertexAnchor_Down;
                     ellipse.MouseMove += VertexAnchor_Move;
                     ellipse.MouseLeftButtonUp += VertexAnchor_Up;
-                    ellipse.Cursor = System.Windows.Input.Cursors.SizeAll;
+                    ellipse.Cursor = Cursors.SizeAll;
                 }
-                // Вершины (Ellipse с Tag int) — игнорируем, события не вешаем
             }
 
             return canvas;
         }
 
-        // ← ЕДИНСТВЕННЫЙ метод RedrawPreservingAnchor (без дублей!)
         private void RedrawPreservingAnchor()
         {
             if (_currentShape == null || _currentShapeVisual == null) return;
 
-            // Сохраняем мировые координаты якоря ДО удаления
             Point worldAnchor = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
             bool wasSelected = (_selectedShapeVisual == _currentShapeVisual);
 
-            // 🔥 Безопасное удаление: проверяем, что элемент действительно есть в коллекции
             if (DrawCanvas.Children.Contains(_currentShapeVisual))
                 DrawCanvas.Children.Remove(_currentShapeVisual);
-
             if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
                 DrawCanvas.Children.Remove(_boundingBoxVisual);
 
-            // Создаём новый визуал
             _currentShapeVisual = CreateShapeVisual(_currentShape, worldAnchor.X, worldAnchor.Y);
+            DrawCanvas.Children.Add(_currentShapeVisual);
 
-            // 🔥 Добавляем только если ещё не добавлен (защита от дублей)
-            if (!DrawCanvas.Children.Contains(_currentShapeVisual))
-                DrawCanvas.Children.Add(_currentShapeVisual);
-
-            // Восстанавливаем выделение
             if (wasSelected)
             {
                 _selectedShapeVisual = _currentShapeVisual;
                 ShowBoundingBox(_currentShapeVisual);
             }
+
+            if (_paramsPanelIsOpen)
+                RefreshParamsPanelValues();
         }
+
+        private void RefreshParamsPanelValues()
+        {
+            if (_currentShape == null) return;
+
+            // Масштаб и угол
+            if (_scaleSlider != null) _scaleSlider.Value = _currentShape.Scale;
+            if (_scaleTextBox != null) _scaleTextBox.Text = _currentShape.Scale.ToString("0.00");
+            if (_angleSlider != null) _angleSlider.Value = _currentShape.Angle;
+            if (_angleTextBox != null) _angleTextBox.Text = ((int)_currentShape.Angle).ToString();
+
+            // Локальный якорь
+            if (_localAnchorXBox != null) _localAnchorXBox.Text = _currentShape.AnchorPoint.X.ToString("0");
+            if (_localAnchorYBox != null) _localAnchorYBox.Text = _currentShape.AnchorPoint.Y.ToString("0");
+
+            // Мировой якорь
+            Point world = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+            if (_worldAnchorXBox != null) _worldAnchorXBox.Text = world.X.ToString("0");
+            if (_worldAnchorYBox != null) _worldAnchorYBox.Text = world.Y.ToString("0");
+        }
+
+        // ────────────────────────────────────────────────
+        // Панель параметров
+        // ────────────────────────────────────────────────
+
+        private void UpdateParamsPanelVisibility()
+        {
+            if (_selectedShapeVisual == null || _currentShape == null)
+            {
+                ParamsContainer.Visibility = Visibility.Collapsed;
+                _paramsPanelIsOpen = false;
+                return;
+            }
+
+            ParamsContainer.Visibility = Visibility.Visible;
+
+            if (!_paramsPanelIsOpen)
+            {
+                if (_paramsShowButton == null)
+                {
+                    _paramsShowButton = new Button
+                    {
+                        Content = "Параметры фигуры",
+                        Margin = new Thickness(0, 12, 0, 12),
+                        Padding = new Thickness(0, 10, 0, 10),
+                        FontSize = 14,
+                        FontWeight = FontWeights.SemiBold
+                    };
+                    _paramsShowButton.Click += ParamsShowButton_Click;
+                }
+
+                ParamsContent.Content = _paramsShowButton;
+            }
+        }
+
+        private void ParamsShowButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentShape == null) return;
+
+            if (_paramsStackPanel == null)
+                _paramsStackPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
+
+            RebuildParamsPanel();
+            ParamsContent.Content = _paramsStackPanel;
+            _paramsPanelIsOpen = true;
+        }
+
+        private void RebuildParamsPanel()
+        {
+            if (_paramsStackPanel == null || _currentShape == null) return;
+
+            _paramsStackPanel.Children.Clear();
+
+            // Очищаем все ссылки
+            _colorTextBoxes.Clear();
+            _colorSwatches.Clear();
+            _thicknessTextBoxes.Clear();
+            _vertexXBoxes.Clear();
+            _vertexYBoxes.Clear();
+
+            bool isCircle = _currentShape is CircleShape;
+            int sides = _currentShape.SidesCount;
+            string[] names = _currentShape.SideNames ?? Array.Empty<string>();
+
+            // Стороны (цвет + толщина)
+            int count = isCircle ? 1 : sides;
+            for (int i = 0; i < count; i++)
+            {
+                string label = isCircle ? "Окружность" : (i < names.Length ? names[i] : $"Сторона {i + 1}");
+
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+
+                row.Children.Add(new TextBlock
+                {
+                    Text = label + ":",
+                    Width = 120,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontWeight = FontWeights.SemiBold
+                });
+
+                var colorTb = new TextBox
+                {
+                    IsReadOnly = true,
+                    Width = 92,
+                    Margin = new Thickness(8, 0, 0, 0),
+                    Text = GetColorHex(i < _currentShape.SideColors.Count ? _currentShape.SideColors[i] : Brushes.Black)
+                };
+                _colorTextBoxes.Add(colorTb);
+
+                var swatch = new Border
+                {
+                    Width = 26,
+                    Height = 26,
+                    Margin = new Thickness(6, 0, 8, 0),
+                    Background = i < _currentShape.SideColors.Count ? _currentShape.SideColors[i] : Brushes.Black,
+                    BorderBrush = Brushes.Gray,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Cursor = Cursors.Hand,
+                    Tag = i
+                };
+                swatch.MouseLeftButtonDown += ColorSwatch_MouseDown;
+                _colorSwatches.Add(swatch);
+
+                var thickTb = new TextBox
+                {
+                    Width = 55,
+                    Margin = new Thickness(4, 0, 0, 0),
+                    Text = i < _currentShape.SideThickness.Count ? _currentShape.SideThickness[i].ToString("0.#") : "3",
+                    Tag = i
+                };
+                thickTb.TextChanged += ThicknessTextChanged;
+                _thicknessTextBoxes.Add(thickTb);
+
+                row.Children.Add(colorTb);
+                row.Children.Add(swatch);
+                row.Children.Add(new TextBlock { Text = "толщина", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 4, 0) });
+                row.Children.Add(thickTb);
+
+                _paramsStackPanel.Children.Add(row);
+            }
+
+            // Заливка
+            var fillRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 16) };
+            fillRow.Children.Add(new TextBlock
+            {
+                Text = "Заливка:",
+                Width = 120,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontWeight = FontWeights.SemiBold
+            });
+
+            _fillTextBox = new TextBox
+            {
+                IsReadOnly = true,
+                Width = 92,
+                Margin = new Thickness(8, 0, 0, 0),
+                Text = GetColorHex(_currentShape.Fill ?? Brushes.Transparent)
+            };
+
+            _fillSwatch = new Border
+            {
+                Width = 26,
+                Height = 26,
+                Margin = new Thickness(6, 0, 8, 0),
+                Background = _currentShape.Fill ?? Brushes.Transparent,
+                BorderBrush = Brushes.Gray,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Cursor = Cursors.Hand
+            };
+            _fillSwatch.MouseLeftButtonDown += FillSwatch_MouseDown;
+
+            fillRow.Children.Add(_fillTextBox);
+            fillRow.Children.Add(_fillSwatch);
+            _paramsStackPanel.Children.Add(fillRow);
+
+            // Вершины
+            if (!isCircle && sides > 0)
+            {
+                _paramsStackPanel.Children.Add(new TextBlock
+                {
+                    Text = "Вершины (X, Y):",
+                    FontWeight = FontWeights.Bold,
+                    Margin = new Thickness(0, 20, 0, 10)
+                });
+
+                for (int i = 0; i < sides; i++)
+                {
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+
+                    row.Children.Add(new TextBlock { Text = $"V{i + 1}:", Width = 40, VerticalAlignment = VerticalAlignment.Center });
+
+                    var xTb = new TextBox
+                    {
+                        Width = 80,
+                        Margin = new Thickness(8, 0, 8, 0),
+                        Text = _currentShape.Vertices[i].X.ToString("0"),
+                        Tag = i
+                    };
+                    xTb.TextChanged += VertexX_TextChanged;
+                    _vertexXBoxes.Add(xTb);
+
+                    var yTb = new TextBox
+                    {
+                        Width = 80,
+                        Text = _currentShape.Vertices[i].Y.ToString("0"),
+                        Tag = i
+                    };
+                    yTb.TextChanged += VertexY_TextChanged;
+                    _vertexYBoxes.Add(yTb);
+
+                    row.Children.Add(xTb);
+                    row.Children.Add(yTb);
+                    _paramsStackPanel.Children.Add(row);
+                }
+            }
+
+            // Точка привязки
+            _paramsStackPanel.Children.Add(new TextBlock
+            {
+                Text = "Точка привязки",
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 20, 0, 8)
+            });
+
+            var localRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
+            localRow.Children.Add(new TextBlock { Text = "Локальная:", Width = 90, VerticalAlignment = VerticalAlignment.Center });
+
+            _localAnchorXBox = new TextBox
+            {
+                Width = 80,
+                Margin = new Thickness(8, 0, 4, 0),
+                Text = _currentShape.AnchorPoint.X.ToString("0")
+            };
+            _localAnchorXBox.TextChanged += LocalAnchorX_TextChanged;
+
+            _localAnchorYBox = new TextBox
+            {
+                Width = 80,
+                Text = _currentShape.AnchorPoint.Y.ToString("0")
+            };
+            _localAnchorYBox.TextChanged += LocalAnchorY_TextChanged;
+
+            localRow.Children.Add(_localAnchorXBox);
+            localRow.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(4, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+            localRow.Children.Add(_localAnchorYBox);
+            _paramsStackPanel.Children.Add(localRow);
+
+            Point world = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+            var worldRow = new StackPanel { Orientation = Orientation.Horizontal };
+            worldRow.Children.Add(new TextBlock { Text = "Мировая:", Width = 90, VerticalAlignment = VerticalAlignment.Center });
+
+            _worldAnchorXBox = new TextBox
+            {
+                Width = 80,
+                Margin = new Thickness(8, 0, 4, 0),
+                Text = world.X.ToString("0"),
+                IsReadOnly = true,
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0)
+            };
+
+            _worldAnchorYBox = new TextBox
+            {
+                Width = 80,
+                Text = world.Y.ToString("0"),
+                IsReadOnly = true,
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0)
+            };
+
+            worldRow.Children.Add(_worldAnchorXBox);
+            worldRow.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(4, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+            worldRow.Children.Add(_worldAnchorYBox);
+            _paramsStackPanel.Children.Add(worldRow);
+
+            // Масштаб и угол
+            _paramsStackPanel.Children.Add(new TextBlock
+            {
+                Text = "Масштаб и поворот",
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 24, 0, 8)
+            });
+
+            var scalePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+            scalePanel.Children.Add(new TextBlock { Text = "Масштаб" });
+            var scaleGrid = new Grid();
+            scaleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            scaleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            _scaleSlider = new Slider { Minimum = 0.1, Maximum = 30, Value = _currentShape.Scale };
+            _scaleSlider.ValueChanged += (s, ev) =>
+            {
+                _currentShape.Scale = ev.NewValue;
+                if (_scaleTextBox != null) _scaleTextBox.Text = ev.NewValue.ToString("0.00");
+                RedrawPreservingAnchor();
+            };
+
+            _scaleTextBox = new TextBox
+            {
+                Width = 70,
+                Margin = new Thickness(12, 0, 0, 0),
+                Text = _currentShape.Scale.ToString("0.00")
+            };
+            _scaleTextBox.TextChanged += (s, ev) =>
+            {
+                if (double.TryParse(_scaleTextBox.Text, out var v) && v >= 0.1 && v <= 30)
+                {
+                    _currentShape.Scale = v;
+                    if (_scaleSlider != null) _scaleSlider.Value = v;
+                    RedrawPreservingAnchor();
+                }
+            };
+
+            Grid.SetColumn(_scaleSlider, 0);
+            Grid.SetColumn(_scaleTextBox, 1);
+            scaleGrid.Children.Add(_scaleSlider);
+            scaleGrid.Children.Add(_scaleTextBox);
+            scalePanel.Children.Add(scaleGrid);
+            _paramsStackPanel.Children.Add(scalePanel);
+
+            var anglePanel = new StackPanel();
+            anglePanel.Children.Add(new TextBlock { Text = "Угол поворота (°)" });
+            var angleGrid = new Grid();
+            angleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            angleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            _angleSlider = new Slider { Minimum = -180, Maximum = 180, Value = _currentShape.Angle, TickFrequency = 15 };
+            _angleSlider.ValueChanged += (s, ev) =>
+            {
+                _currentShape.Angle = ev.NewValue;
+                if (_angleTextBox != null) _angleTextBox.Text = ((int)ev.NewValue).ToString();
+                RedrawPreservingAnchor();
+            };
+
+            _angleTextBox = new TextBox
+            {
+                Width = 70,
+                Margin = new Thickness(12, 0, 0, 0),
+                Text = ((int)_currentShape.Angle).ToString()
+            };
+            _angleTextBox.TextChanged += (s, ev) =>
+            {
+                if (double.TryParse(_angleTextBox.Text, out var v))
+                {
+                    _currentShape.Angle = v;
+                    if (_angleSlider != null) _angleSlider.Value = v;
+                    RedrawPreservingAnchor();
+                }
+            };
+
+            Grid.SetColumn(_angleSlider, 0);
+            Grid.SetColumn(_angleTextBox, 1);
+            angleGrid.Children.Add(_angleSlider);
+            angleGrid.Children.Add(_angleTextBox);
+            anglePanel.Children.Add(angleGrid);
+            _paramsStackPanel.Children.Add(anglePanel);
+        }
+
+        private string GetColorHex(Brush brush)
+        {
+            if (brush is SolidColorBrush scb)
+                return $"#{scb.Color.A:X2}{scb.Color.R:X2}{scb.Color.G:X2}{scb.Color.B:X2}";
+            return "#00FFFFFF";
+        }
+
+        private void ColorSwatch_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is not Border swatch || swatch.Tag is not int idx) return;
+
+            using var dialog = new System.Windows.Forms.ColorDialog();
+            if (swatch.Background is SolidColorBrush scb)
+                dialog.Color = Drawing.Color.FromArgb(scb.Color.A, scb.Color.R, scb.Color.G, scb.Color.B);
+
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                var c = System.Windows.Media.Color.FromArgb(dialog.Color.A, dialog.Color.R, dialog.Color.G, dialog.Color.B);
+                var brush = new SolidColorBrush(c);
+
+                _currentShape.SideColors[idx] = brush;
+                swatch.Background = brush;
+                if (idx < _colorTextBoxes.Count)
+                    _colorTextBoxes[idx].Text = GetColorHex(brush);
+
+                RedrawPreservingAnchor();
+            }
+        }
+
+        private void FillSwatch_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (_fillSwatch == null) return;
+
+            using var dialog = new System.Windows.Forms.ColorDialog();
+            if (_fillSwatch.Background is SolidColorBrush scb)
+                dialog.Color = Drawing.Color.FromArgb(scb.Color.A, scb.Color.R, scb.Color.G, scb.Color.B);
+
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                var c = System.Windows.Media.Color.FromArgb(dialog.Color.A, dialog.Color.R, dialog.Color.G, dialog.Color.B);
+                var brush = new SolidColorBrush(c);
+
+                _currentShape.Fill = brush;
+                _fillSwatch.Background = brush;
+                if (_fillTextBox != null)
+                    _fillTextBox.Text = GetColorHex(brush);
+
+                RedrawPreservingAnchor();
+            }
+        }
+
+        private void ThicknessTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender is not TextBox tb || tb.Tag is not int idx) return;
+            if (double.TryParse(tb.Text, out double v) && v > 0)
+            {
+                while (_currentShape.SideThickness.Count <= idx)
+                    _currentShape.SideThickness.Add(3);
+                _currentShape.SideThickness[idx] = v;
+                RedrawPreservingAnchor();
+            }
+        }
+
+        private void VertexX_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender is not TextBox tb || !int.TryParse(tb.Tag?.ToString(), out int idx)) return;
+            if (double.TryParse(tb.Text, out double v))
+            {
+                if (idx >= 0 && idx < _currentShape.Vertices.Length)
+                {
+                    var p = _currentShape.Vertices[idx];
+                    p.X = v;
+                    _currentShape.Vertices[idx] = p;
+                    RedrawPreservingAnchor();
+                }
+            }
+        }
+
+        private void VertexY_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender is not TextBox tb || !int.TryParse(tb.Tag?.ToString(), out int idx)) return;
+            if (double.TryParse(tb.Text, out double v))
+            {
+                if (idx >= 0 && idx < _currentShape.Vertices.Length)
+                {
+                    var p = _currentShape.Vertices[idx];
+                    p.Y = v;
+                    _currentShape.Vertices[idx] = p;
+                    RedrawPreservingAnchor();
+                }
+            }
+        }
+
+        private void LocalAnchorX_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender is not TextBox tb || !double.TryParse(tb.Text, out double v)) return;
+            var p = _currentShape.AnchorPoint;
+            p.X = v;
+            _currentShape.AnchorPoint = p;
+            RedrawPreservingAnchor();
+        }
+
+        private void LocalAnchorY_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender is not TextBox tb || !double.TryParse(tb.Text, out double v)) return;
+            var p = _currentShape.AnchorPoint;
+            p.Y = v;
+            _currentShape.AnchorPoint = p;
+            RedrawPreservingAnchor();
+        }
+
+        // ────────────────────────────────────────────────
+        // Перетаскивание фигур и якоря (без изменений)
+        // ────────────────────────────────────────────────
 
         private void VertexAnchor_Down(object sender, MouseButtonEventArgs e)
         {
             if (sender is not Ellipse ellipse) return;
 
-            // Находим фигуру, к которой принадлежит этот якорь
-            if (ellipse is FrameworkElement fe && fe.Parent is Canvas shapeCanvas && shapeCanvas.Tag is ShapeBase shape)
+            if (ellipse.Parent is Canvas shapeCanvas && shapeCanvas.Tag is ShapeBase shape)
             {
                 _currentShape = shape;
                 _currentShapeVisual = shapeCanvas;
-                anchorDragCanvas = shapeCanvas;  // ← без подчёркивания!
+                anchorDragCanvas = shapeCanvas;
             }
             else return;
-
-            if (_currentShape == null) return;
 
             dragStartWorld = e.GetPosition(DrawCanvas);
             originalAnchorPos = _currentShape.AnchorPoint;
             draggingAnchor = true;
-
             ellipse.CaptureMouse();
             e.Handled = true;
         }
 
         private void VertexAnchor_Move(object sender, MouseEventArgs e)
         {
-            if (!draggingAnchor || _currentShape == null || anchorDragCanvas == null)
-                return;
-
+            if (!draggingAnchor || _currentShape == null || anchorDragCanvas == null) return;
             if (_isProcessingMove) return;
-            _isProcessingMove = true;
 
+            _isProcessingMove = true;
             try
             {
                 Point currentWorld = e.GetPosition(DrawCanvas);
                 Vector deltaWorld = currentWorld - dragStartWorld;
                 Vector deltaLocal = deltaWorld / _currentShape.Scale;
 
-                // Обновляем локальные координаты якоря
                 _currentShape.AnchorPoint = new Point(
                     Math.Round(originalAnchorPos.X + deltaLocal.X),
                     Math.Round(originalAnchorPos.Y + deltaLocal.Y));
 
-                // Обновляем окно параметров, если открыто
-                if (_currentParamsWindow != null)
-                {
-                    _currentParamsWindow.UpdateLocalAnchor(_currentShape.AnchorPoint);
-                    _currentParamsWindow.UpdateWorldAnchor(
-                        _currentShape.GetAnchorWorldPosition(_currentShapeVisual));
-                }
-
-                // 🔥 Перерисовываем с сохранением захвата мыши
                 RedrawPreservingAnchorWithMouseCapture();
             }
             finally
@@ -247,7 +717,6 @@ namespace ShapeEditor
             }
         }
 
-        // 🔥 НОВАЯ версия RedrawPreservingAnchor для перетаскивания якоря
         private void RedrawPreservingAnchorWithMouseCapture()
         {
             if (_currentShape == null || _currentShapeVisual == null) return;
@@ -255,27 +724,20 @@ namespace ShapeEditor
             Point worldAnchor = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
             bool wasSelected = (_selectedShapeVisual == _currentShapeVisual);
 
-            // Удаляем старые элементы
             if (DrawCanvas.Children.Contains(_currentShapeVisual))
                 DrawCanvas.Children.Remove(_currentShapeVisual);
             if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
                 DrawCanvas.Children.Remove(_boundingBoxVisual);
 
-            // Создаём новый визуал
-            var oldCanvas = _currentShapeVisual;
             _currentShapeVisual = CreateShapeVisual(_currentShape, worldAnchor.X, worldAnchor.Y);
+            DrawCanvas.Children.Add(_currentShapeVisual);
 
-            if (!DrawCanvas.Children.Contains(_currentShapeVisual))
-                DrawCanvas.Children.Add(_currentShapeVisual);
-
-            // Восстанавливаем выделение
             if (wasSelected)
             {
                 _selectedShapeVisual = _currentShapeVisual;
                 ShowBoundingBox(_currentShapeVisual);
             }
 
-            // 🔥 КЛЮЧЕВОЕ: передаём захват мыши на НОВУЮ красную точку
             foreach (UIElement child in _currentShapeVisual.Children)
             {
                 if (child is Ellipse ellipse && ellipse.Tag is string tag && tag == "Anchor")
@@ -290,28 +752,24 @@ namespace ShapeEditor
         {
             (sender as Ellipse)?.ReleaseMouseCapture();
             draggingAnchor = false;
-            anchorDragCanvas = null;  // ← без подчёркивания!
+            anchorDragCanvas = null;
             e.Handled = true;
         }
 
         private void ShapeCanvas_Down(object sender, MouseButtonEventArgs e)
         {
-            // Если тянем якорь — игнорируем этот обработчик
             if (draggingAnchor) return;
 
             if (e.ClickCount == 2 && sender is Canvas canvas && canvas.Tag is ShapeBase shape)
             {
                 _currentShape = shape;
                 _currentShapeVisual = canvas;
-                OpenEditWindow(-2);
                 e.Handled = true;
                 return;
             }
 
             if (sender is Canvas clickedCanvas)
-            {
                 SelectShape(clickedCanvas);
-            }
 
             draggedShapeCanvas = sender as Canvas;
             if (draggedShapeCanvas == null) return;
@@ -320,7 +778,6 @@ namespace ShapeEditor
             startMouse = e.GetPosition(DrawCanvas);
             startLeft = Canvas.GetLeft(draggedShapeCanvas);
             startTop = Canvas.GetTop(draggedShapeCanvas);
-
             draggedShapeCanvas.CaptureMouse();
         }
 
@@ -349,65 +806,9 @@ namespace ShapeEditor
             potentialDrag = false;
         }
 
-        private void OpenEditWindow(int selectedIndex)
-        {
-            if (_currentShape == null || _currentShapeVisual == null) return;
-
-            Point worldAnchor = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
-
-            var win = new ShapeParamsWindow(
-                _currentShape.SidesCount,
-                _currentShape.SideNames,
-                _currentShape.SideColors,
-                _currentShape.SideThickness,
-                _currentShape.Scale,
-                _currentShape.Fill,
-                _currentShape.Vertices,
-                _currentShape.AnchorPoint,
-                _currentShape.Angle,
-                _currentShape is CircleShape,
-                selectedIndex,
-                worldAnchor);
-
-            _currentParamsWindow = win;
-
-            if (win.ShowDialog() == true)
-            {
-                _currentShape.SideColors = win.Colors;
-                _currentShape.SideThickness = win.Thicknesses;
-                _currentShape.Fill = win.Fill;
-                _currentShape.Scale = win.Scale;
-                _currentShape.Angle = win.Angle;
-                _currentShape.Vertices = win.Vertices ?? _currentShape.Vertices;
-                _currentShape.AnchorPoint = win.AnchorPoint;
-
-                RedrawPreservingAnchor();
-            }
-
-            _currentParamsWindow = null;
-        }
-
         private void CloseButton_Click(object sender, RoutedEventArgs e)
         {
             Application.Current.Shutdown();
-        }
-
-        private void ScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            if (_currentShape == null || _currentShapeVisual == null) return;
-
-            _currentShape.Scale = e.NewValue;
-            ScaleValueText.Text = e.NewValue.ToString("0.00");
-            RedrawPreservingAnchor();
-        }
-
-        private void AngleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            if (_currentShape == null || _currentShapeVisual == null) return;
-
-            _currentShape.Angle = e.NewValue;
-            AngleValueText.Text = $"{(int)e.NewValue}°";
-            RedrawPreservingAnchor();
         }
     }
 }

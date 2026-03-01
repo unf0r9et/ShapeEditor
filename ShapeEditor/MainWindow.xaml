@@ -12,7 +12,7 @@
     <Grid>
         <!-- 🔥 ColumnDefinitions должны быть ПЕРВЫМИ в Grid! -->
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="240" />
+            <ColumnDefinition Width="380" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -120,53 +120,23 @@
                 </ScrollViewer>
 
                 <!-- Настройки внизу панели -->
-                <Border DockPanel.Dock="Bottom"
-                        Background="{DynamicResource MaterialDesignDivider}"
-                        Padding="12,15"
-                        Margin="0,20,0,0">
-                    <StackPanel>
-                        <!-- Масштаб -->
-                        <TextBlock Text="Масштаб"
-                                   Foreground="{DynamicResource MaterialDesignBody}"
-                                   FontWeight="SemiBold"
-                                   Margin="0,0,0,8"
-                                   FontSize="13" />
-                        <Slider x:Name="ScaleSlider"
-                                Minimum="0.1"
-                                Maximum="30"
-                                Value="1.0"
-                                TickFrequency="0.1"
-                                IsSnapToTickEnabled="False"
-                                ValueChanged="ScaleSlider_ValueChanged"
-                                Style="{StaticResource MaterialDesignSlider}" />
-                        <TextBlock x:Name="ScaleValueText"
-                                   Text="1.00"
-                                   Foreground="{DynamicResource MaterialDesignBody}"
-                                   HorizontalAlignment="Right"
-                                   Margin="0,4,0,0"
-                                   FontSize="12" />
+                <!-- Внутри DockPanel, после ScrollViewer с кнопками фигур -->
+                <Border x:Name="ParamsContainer"
+        DockPanel.Dock="Bottom"
+        Background="{DynamicResource MaterialDesignCardBackground}"
+        BorderBrush="{DynamicResource MaterialDesignDivider}"
+        BorderThickness="0,1,0,0"
+        Padding="0"
+        MinHeight="100"
+        Visibility="Collapsed">
 
-                        <!-- Угол поворота -->
-                        <TextBlock Text="Угол поворота"
-                                   Foreground="{DynamicResource MaterialDesignBody}"
-                                   FontWeight="SemiBold"
-                                   Margin="0,16,0,8"
-                                   FontSize="13" />
-                        <Slider x:Name="AngleSlider"
-                                Minimum="-180"
-                                Maximum="180"
-                                Value="0"
-                                TickFrequency="15"
-                                IsSnapToTickEnabled="False"
-                                ValueChanged="AngleSlider_ValueChanged"
-                                Style="{StaticResource MaterialDesignSlider}" />
-                        <TextBlock x:Name="AngleValueText"
-                                   Text="0°"
-                                   Foreground="{DynamicResource MaterialDesignBody}"
-                                   HorizontalAlignment="Right"
-                                   Margin="0,4,0,0"
-                                   FontSize="12" />
-                    </StackPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Padding="12,8,12,12">
+
+                        <ContentPresenter x:Name="ParamsContent" />
+
+                    </ScrollViewer>
                 </Border>
 
             </DockPanel>
