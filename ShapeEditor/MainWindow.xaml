@@ -17,20 +17,6 @@
         </Grid.ColumnDefinitions>
 
         <!-- Кнопка закрытия в правом верхнем углу холста -->
-        <Button Grid.Column="1"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Top"
-                Margin="12"
-                Width="36"
-                Height="36"
-                Click="CloseButton_Click"
-                ToolTip="Закрыть приложение"
-                Style="{StaticResource MaterialDesignFlatButton}">
-            <materialDesign:PackIcon Kind="Close" 
-                                     Width="20" 
-                                     Height="20"
-                                     Foreground="{DynamicResource MaterialDesignBody}" />
-        </Button>
 
         <!-- Левая панель управления -->
         <Border Grid.Column="0"
@@ -45,7 +31,7 @@
                         Background="{DynamicResource PrimaryHueMidBrush}"
 
                         Padding="0,15,0,15">
-                    
+
                     <TextBlock Text="ФИГУРЫ"
                                FontSize="24"
                                Foreground="Black"
@@ -164,5 +150,20 @@
                 </ContextMenu>
             </Canvas.ContextMenu>
         </Canvas>
+        <Button
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="0,10,346,0"
+                Width="64"
+                Height="26"
+                Background="Lavender"
+                Click="CloseButton_Click"
+                ToolTip="Закрыть приложение"
+                Style="{StaticResource MaterialDesignFlatButton}">
+            <materialDesign:PackIcon Kind="Close" 
+                                     Width="20" 
+                                     Height="20"
+                                     Foreground="{DynamicResource MaterialDesignBody}" />
+        </Button>
     </Grid>
 </Window>

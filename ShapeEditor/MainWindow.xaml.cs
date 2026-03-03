@@ -62,6 +62,7 @@ namespace ShapeEditor
         public MainWindow()
         {
             InitializeComponent();
+            this.PreviewKeyDown += MainWindow_PreviewKeyDown;
             DrawCanvas.MouseLeftButtonDown += DrawCanvas_BackgroundClick;
         }
 
@@ -77,6 +78,36 @@ namespace ShapeEditor
                 ClearSelection();
         }
 
+        private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            // Пропускаем, если фокус на TextBox (чтобы не удалять фигуру при редактировании чисел)
+            if (Keyboard.FocusedElement is TextBox) return;
+
+            if (e.Key == Key.Delete && _selectedShapeVisual != null)
+            {
+                // Удаляем выделенную фигуру
+                if (DrawCanvas.Children.Contains(_selectedShapeVisual))
+                    DrawCanvas.Children.Remove(_selectedShapeVisual);
+
+                if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
+                    DrawCanvas.Children.Remove(_boundingBoxVisual);
+
+                // Удаляем из списков
+                _allShapeVisuals.Remove(_selectedShapeVisual);
+                _allShapes.Remove(_currentShape);
+
+                // Снимаем выделение
+                _selectedShapeVisual = null;
+                _currentShape = null;
+                _currentShapeVisual = null;
+                _boundingBoxVisual = null;
+
+                // Обновляем панель параметров
+                UpdateParamsPanelVisibility();
+
+                e.Handled = true;
+            }
+        }
         private void ClearSelection()
         {
             if (_boundingBoxVisual != null)
