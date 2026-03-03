@@ -43,9 +43,11 @@
                 <!-- Заголовок панели -->
                 <Border DockPanel.Dock="Top"
                         Background="{DynamicResource PrimaryHueMidBrush}"
+
                         Padding="0,15,0,15">
+                    
                     <TextBlock Text="ФИГУРЫ"
-                               FontSize="20"
+                               FontSize="24"
                                Foreground="Black"
                                HorizontalAlignment="Center" FontWeight="Bold" />
                 </Border>
@@ -65,6 +67,7 @@
                                 BorderBrush="{DynamicResource PrimaryHueMidBrush}"
                                 Foreground="{DynamicResource PrimaryHueMidBrush}"
                                 Margin="0,6"
+                                Background="Lavender"
                                 Height="42"
                                 Click="AddRectangle">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
@@ -76,6 +79,7 @@
                                 BorderBrush="{DynamicResource PrimaryHueMidBrush}"
                                 Foreground="{DynamicResource PrimaryHueMidBrush}"
                                 Margin="0,6"
+                                Background="Lavender"
                                 Height="42"
                                 Click="AddTriangle">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
@@ -88,6 +92,7 @@
                                 Foreground="{DynamicResource PrimaryHueMidBrush}"
                                 Margin="0,6"
                                 Height="42"
+                                Background="Lavender" 
                                 Click="AddTrapezoid">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                 <TextBlock Text="Трапеция" VerticalAlignment="Center" FontSize="16"/>
@@ -99,6 +104,8 @@
                                 Foreground="{DynamicResource PrimaryHueMidBrush}"
                                 Margin="0,6"
                                 Height="42"
+                                                                Background="Lavender" 
+
                                 Click="AddCircle">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                 <TextBlock Text="Окружность" VerticalAlignment="Center" FontSize="16"/>
@@ -109,6 +116,7 @@
                                 BorderBrush="{DynamicResource PrimaryHueMidBrush}"
                                 Foreground="{DynamicResource PrimaryHueMidBrush}"
                                 Margin="0,6"
+                                Background="Lavender" 
                                 Height="42"
                                 Click="AddHexagon">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
