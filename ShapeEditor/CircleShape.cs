@@ -70,8 +70,8 @@ namespace ShapeEditor
             {
                 Width = 10,
                 Height = 10,
-                Fill = Brushes.Red,
-                Stroke = Brushes.DarkRed,
+                Fill = Brushes.White,
+                Stroke = Brushes.Purple,
                 StrokeThickness = 1,
                 Tag = "Anchor"
             };

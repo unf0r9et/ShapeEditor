@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
@@ -28,6 +28,11 @@ namespace ShapeEditor
         public double MinX { get; protected set; }
         public double MinY { get; protected set; }
 
+        public double MaxX { get; protected set; }
+        public double MaxY { get; protected set; }
+
+        public List<bool> EdgeLengthLocked { get; set; } = new();
+
         protected abstract Point[] GetDefaultVertices();
 
         public virtual string[] SideNames
@@ -44,6 +49,9 @@ namespace ShapeEditor
         protected ShapeBase()
         {
             Vertices = GetDefaultVertices();
+            // initialize locks for each edge
+            EdgeLengthLocked = new List<bool>(Vertices.Length);
+            for (int i = 0; i < Vertices.Length; i++) EdgeLengthLocked.Add(false);
         }
 
         /// <summary>
@@ -170,6 +178,59 @@ namespace ShapeEditor
             return (p - closest).Length;
         }
 
+        private static bool SegmentsIntersect(Point a1, Point a2, Point b1, Point b2)
+        {
+            bool OnSegment(Point p, Point q, Point r)
+            {
+                return q.X <= Math.Max(p.X, r.X) && q.X >= Math.Min(p.X, r.X) &&
+                       q.Y <= Math.Max(p.Y, r.Y) && q.Y >= Math.Min(p.Y, r.Y);
+            }
+
+            int Orientation(Point p, Point q, Point r)
+            {
+                double val = (q.Y - p.Y) * (r.X - q.X) - (q.X - p.X) * (r.Y - q.Y);
+                if (Math.Abs(val) < 1e-9) return 0;
+                return (val > 0) ? 1 : 2;
+            }
+
+            int o1 = Orientation(a1, a2, b1);
+            int o2 = Orientation(a1, a2, b2);
+            int o3 = Orientation(b1, b2, a1);
+            int o4 = Orientation(b1, b2, a2);
+
+            if (o1 != o2 && o3 != o4) return true;
+
+            if (o1 == 0 && OnSegment(a1, b1, a2)) return true;
+            if (o2 == 0 && OnSegment(a1, b2, a2)) return true;
+            if (o3 == 0 && OnSegment(b1, a1, b2)) return true;
+            if (o4 == 0 && OnSegment(b1, a2, b2)) return true;
+
+            return false;
+        }
+
+        private bool IsSimplePolygon(Point[] verts)
+        {
+            int n = verts.Length;
+            for (int i = 0; i < n; i++)
+            {
+                Point a1 = verts[i];
+                Point a2 = verts[(i + 1) % n];
+                for (int j = i + 1; j < n; j++)
+                {
+                    // skip adjacent
+                    if (Math.Abs(i - j) <= 1) continue;
+                    if (i == 0 && j == n - 1) continue;
+
+                    Point b1 = verts[j];
+                    Point b2 = verts[(j + 1) % n];
+
+                    if (SegmentsIntersect(a1, a2, b1, b2))
+                        return false;
+                }
+            }
+            return true;
+        }
+
         // Возвращает мировые координаты точки привязки по текущему положению canvas
         public Point GetAnchorWorldPosition(Canvas canvas)
         {
@@ -178,6 +239,213 @@ namespace ShapeEditor
             double anchorLocalX = AnchorPoint.X * Scale;
             double anchorLocalY = AnchorPoint.Y * Scale;
             return new Point(left + anchorLocalX - MinX, top + anchorLocalY - MinY);
+        }
+
+        /// <summary>
+        /// Возвращает координаты углов ограничивающего прямоугольника в мировых координатах холста.
+        /// </summary>
+        public (Point bottomLeft, Point topRight) GetBoundingBoxCorners(Canvas canvas)
+        {
+            double left = Canvas.GetLeft(canvas);
+            double top = Canvas.GetTop(canvas);
+
+            // Размеры canvas = Max - Min в масштабированных локальных координатах
+            double width = MaxX - MinX;
+            double height = MaxY - MinY;
+
+            // В WPF: Y растёт вниз, поэтому:
+            Point bottomLeft = new Point(left, top + height);      // левый нижний
+            Point topRight = new Point(left + width, top);         // правый верхний
+
+            return (bottomLeft, topRight);
+        }
+
+        /// <summary>
+        /// Возвращает длину ребра с указанным индексом (в немасштабированных локальных координатах)
+        /// </summary>
+        public double GetEdgeLength(int edgeIndex)
+        {
+            if (edgeIndex < 0 || edgeIndex >= Vertices.Length)
+                return 0;
+
+            Point p1 = Vertices[edgeIndex];
+            Point p2 = Vertices[(edgeIndex + 1) % Vertices.Length];
+
+            Vector diff = p2 - p1;
+            return diff.Length;
+        }
+
+        /// <summary>
+        /// Изменяет длину ребра, перемещая вторую вершину (конец ребра)
+        /// </summary>
+        public void SetEdgeLength(int edgeIndex, double newLength)
+        {
+            if (edgeIndex < 0 || edgeIndex >= Vertices.Length || newLength <= 0)
+                return;
+
+            int n = Vertices.Length;
+
+            // Если ребро заблокировано, не меняем его
+            if (EdgeLengthLocked != null && edgeIndex < EdgeLengthLocked.Count && EdgeLengthLocked[edgeIndex])
+                return;
+
+            // Специализированная логика для равнобокой трапеции:
+            // сохраняем форму "правильной" трапеции (горизонтальные основания, боковые стороны равной длины)
+            // и изменяем только параметры (длины оснований или высоту через длину боковых сторон).
+            if (this is TrapezoidShape && n == 4)
+            {
+                // Текущие вершины
+                Point t0 = Vertices[0]; // верхняя левая
+                Point t1 = Vertices[1]; // верхняя правая
+                Point t2 = Vertices[2]; // нижняя правая
+                Point t3 = Vertices[3]; // нижняя левая
+
+                // Центр трапеции
+                double centerX = (t0.X + t1.X + t2.X + t3.X) / 4.0;
+                double topY = (t0.Y + t1.Y) / 2.0;
+                double bottomY = (t3.Y + t2.Y) / 2.0;
+                double height = bottomY - topY;
+                if (Math.Abs(height) < 1e-6) height = height >= 0 ? 1e-6 : -1e-6;
+
+                // Полудлины оснований
+                double halfTop = (t1.X - t0.X) / 2.0;
+                double halfBottom = (t2.X - t3.X) / 2.0;
+
+                // Направление "вниз" по высоте (знак)
+                double signH = Math.Sign(height);
+                double absHeight = Math.Abs(height);
+
+                double targetHalfTop = halfTop;
+                double targetHalfBottom = halfBottom;
+                double targetHeight = absHeight;
+
+                // Верхнее основание (0) или нижнее (2) — меняем соответствующую длину основания
+                if (edgeIndex == 0)
+                {
+                    targetHalfTop = newLength / 2.0;
+                }
+                else if (edgeIndex == 2)
+                {
+                    targetHalfBottom = newLength / 2.0;
+                }
+                // Боковые стороны (1 и 3) — трактуем введённое значение как нужную длину боковой стороны
+                else if (edgeIndex == 1 || edgeIndex == 3)
+                {
+                    // Горизонтальное смещение между серединой верхнего и нижнего основания
+                    double dx = targetHalfBottom - targetHalfTop;
+                    double minLeg = Math.Abs(dx);
+                    double targetLeg = newLength;
+
+                    if (targetLeg < minLeg + 1e-6)
+                        targetLeg = minLeg + 1e-6; // не даём высоте стать мнимой
+
+                    // Новая высота из прямоугольного треугольника: leg^2 = dx^2 + h^2
+                    double newAbsHeight = Math.Sqrt(Math.Max(targetLeg * targetLeg - dx * dx, 1e-6));
+                    targetHeight = newAbsHeight;
+                }
+
+                // Перестраиваем трапецию в каноническом виде (горизонтальные основания, симметрия относительно centerX)
+                double newTopY = (topY + bottomY) / 2.0 - (targetHeight / 2.0) * signH;
+                double newBottomY = (topY + bottomY) / 2.0 + (targetHeight / 2.0) * signH;
+
+                Point[] newVertsTrap =
+                {
+                    new Point(centerX - targetHalfTop, newTopY),   // верхняя левая
+                    new Point(centerX + targetHalfTop, newTopY),   // верхняя правая
+                    new Point(centerX + targetHalfBottom, newBottomY), // нижняя правая
+                    new Point(centerX - targetHalfBottom, newBottomY)  // нижняя левая
+                };
+
+                if (!IsSimplePolygon(newVertsTrap))
+                    return;
+
+                Vertices = newVertsTrap;
+                return;
+            }
+
+            // Специализированная логика для прямоугольника:
+            // сохраняем прямоугольную форму (прямые углы) и просто меняем ширину/высоту,
+            // чтобы при одинаковых длинах противоположных сторон не получался параллелограмм.
+            if (this is RectangleShape && n == 4)
+            {
+                // Векторы текущих рёбер
+                Vector e0 = Vertices[1] - Vertices[0]; // "ширина"
+                Vector e1 = Vertices[2] - Vertices[1]; // "высота"
+
+                double currentWidth = e0.Length;
+                double currentHeight = e1.Length;
+                if (currentWidth < 1e-6 || currentHeight < 1e-6)
+                    return;
+
+                double targetWidth = currentWidth;
+                double targetHeight = currentHeight;
+
+                // Если редактируем верхнюю или нижнюю грань — меняем ширину
+                if (edgeIndex == 0 || edgeIndex == 2)
+                    targetWidth = newLength;
+                // Если правую или левую — меняем высоту
+                else if (edgeIndex == 1 || edgeIndex == 3)
+                    targetHeight = newLength;
+
+                if (targetWidth <= 0 || targetHeight <= 0)
+                    return;
+
+                // Центр текущего четырёхугольника в локальных координатах
+                Point c = new Point(
+                    (Vertices[0].X + Vertices[1].X + Vertices[2].X + Vertices[3].X) / 4.0,
+                    (Vertices[0].Y + Vertices[1].Y + Vertices[2].Y + Vertices[3].Y) / 4.0);
+
+                // Ось "ширины" берём по направлению верхнего ребра
+                Vector u = e0;
+                u.Normalize();
+
+                // Ось "высоты" — строго перпендикулярна оси ширины, но ориентируем её
+                // так, чтобы направление было максимально похоже на исходное e1.
+                Vector v = new Vector(-u.Y, u.X); // поворот на +90°
+                if (Vector.Multiply(v, e1) < 0)   // если смотрит "вниз головой" относительно e1
+                    v = -v;
+
+                double halfW = targetWidth / 2.0;
+                double halfH = targetHeight / 2.0;
+
+                Point[] newVertsRect = new Point[4];
+                newVertsRect[0] = c - halfW * u - halfH * v;
+                newVertsRect[1] = c + halfW * u - halfH * v;
+                newVertsRect[2] = c + halfW * u + halfH * v;
+                newVertsRect[3] = c - halfW * u + halfH * v;
+
+                if (!IsSimplePolygon(newVertsRect))
+                    return;
+
+                Vertices = newVertsRect;
+                return;
+            }
+
+            Point p1 = Vertices[edgeIndex];
+            Point p2 = Vertices[(edgeIndex + 1) % Vertices.Length];
+
+            Vector diff = p2 - p1;
+            double currentLength = diff.Length;
+
+            if (currentLength < 1e-6)  // Очень маленькое значение, чтобы избежать деления на ноль
+                return;
+
+            // Новая логика: перемещаем только вторую вершину вдоль текущего направления ребра.
+            // Это минимально инвазивно и не меняет положение противоположных вершин, что
+            // предотвращает непредсказуемые искажения (параллелограммы) при последовательных изменениях.
+            Vector direction = diff / currentLength; // unit along edge from p1->p2
+            Point newP2Single = p1 + direction * newLength;
+
+            // Проверяем, не приведёт ли изменение к самопересечению полигона
+            Point[] newVertsSingle = (Point[])Vertices.Clone();
+            newVertsSingle[(edgeIndex + 1) % Vertices.Length] = newP2Single;
+            if (!IsSimplePolygon(newVertsSingle))
+            {
+                // Если стало самопересечением — отменяем изменение
+                return;
+            }
+
+            Vertices[(edgeIndex + 1) % Vertices.Length] = newP2Single;
         }
 
         public virtual Canvas Build(double anchorWorldX, double anchorWorldY)
@@ -270,6 +538,9 @@ namespace ShapeEditor
             MinX = minX;
             MinY = minY;
 
+            MaxX = maxX;
+            MaxY = maxY;
+
             Canvas canvas = new Canvas { Width = width, Height = height };
 
             // Заливка
@@ -311,8 +582,8 @@ namespace ShapeEditor
             {
                 Width = 10,
                 Height = 10,
-                Fill = Brushes.Red,
-                Stroke = Brushes.DarkRed,
+                Fill = Brushes.White,
+                Stroke = Brushes.Purple,
                 StrokeThickness = 1,
                 Tag = "Anchor"
             };
