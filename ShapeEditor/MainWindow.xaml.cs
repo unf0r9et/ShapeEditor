@@ -72,7 +72,8 @@ namespace ShapeEditor
         // Флаг, чтобы отличать программное обновление полей длины рёбер от пользовательского ввода
         private bool _isUpdatingEdgeLengthText;
 
-
+        // Отложенные значения, введённые пользователем, применяются по потере фокуса или по кнопке Применить
+        private List<double?> _pendingEdgeLengths = new();
 
 
         public MainWindow()
@@ -467,10 +468,14 @@ namespace ShapeEditor
             _vertexYBoxes.Clear();
             _edgeLengthBoxes.Clear();
             _edgeLockBoxes.Clear();
+            _pendingEdgeLengths.Clear();
 
             bool isCircle = _currentShape is CircleShape;
             int sides = _currentShape.SidesCount;
             string[] names = _currentShape.SideNames ?? Array.Empty<string>();
+
+            // prepare pending lengths
+            for (int i = 0; i < sides; i++) _pendingEdgeLengths.Add(null);
 
             // Стороны (цвет + толщина)
             int count = isCircle ? 1 : sides;
@@ -616,6 +621,10 @@ namespace ShapeEditor
                         Text = currentLength.ToString("0.0"),
                         Tag = i
                     };
+                    // Обработчики: сохраняем ввод в отложенные значения, применяем по потере фокуса или Enter
+                    edgeLengthTb.TextChanged += EdgeLength_TextChanged;
+                    edgeLengthTb.LostFocus += EdgeLength_LostFocus;
+                    edgeLengthTb.KeyDown += EdgeLength_KeyDown;
                     edgeRow.Children.Add(edgeLengthTb);
 
                     var lockCb = new CheckBox
@@ -1051,33 +1060,132 @@ namespace ShapeEditor
         private void EdgeLength_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (sender is not TextBox tb || !int.TryParse(tb.Tag?.ToString(), out int edgeIndex)) return;
-            // Игнорируем событие, если мы сами только что программно обновили текст
             if (_isUpdatingEdgeLengthText) return;
 
-            if (double.TryParse(tb.Text, out double newLength) && newLength > 0)
+            // Сохраняем введённое значение, но не применяем сразу — дождёмся LostFocus или Enter
+            if (double.TryParse(tb.Text, out double v) && v > 0)
             {
-                _currentShape.SetEdgeLength(edgeIndex, newLength);
-                RedrawPreservingAnchor();
+                while (_pendingEdgeLengths.Count <= edgeIndex) _pendingEdgeLengths.Add(null);
+                _pendingEdgeLengths[edgeIndex] = v;
             }
+            else
+            {
+                // если ввод некорректен, сбрасываем pending
+                if (_pendingEdgeLengths.Count > edgeIndex)
+                    _pendingEdgeLengths[edgeIndex] = null;
+            }
+        }
+
+        private void EdgeLength_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is not TextBox tb || !int.TryParse(tb.Tag?.ToString(), out int edgeIndex)) return;
+            if (_pendingEdgeLengths.Count <= edgeIndex) return;
+            var val = _pendingEdgeLengths[edgeIndex];
+            if (val == null) return;
+
+            ApplyPendingEdgeLength(edgeIndex, val.Value);
+            _pendingEdgeLengths[edgeIndex] = null;
+            if (_paramsPanelIsOpen) RefreshParamsPanelValues();
+        }
+
+        private void EdgeLength_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter) return;
+            if (sender is not TextBox tb || !int.TryParse(tb.Tag?.ToString(), out int edgeIndex)) return;
+            if (_pendingEdgeLengths.Count <= edgeIndex) return;
+            var val = _pendingEdgeLengths[edgeIndex];
+            if (val == null) return;
+
+            ApplyPendingEdgeLength(edgeIndex, val.Value);
+            _pendingEdgeLengths[edgeIndex] = null;
+            if (_paramsPanelIsOpen) RefreshParamsPanelValues();
+        }
+
+        private void ApplyPendingEdgeLength(int edgeIndex, double value)
+        {
+            if (_currentShape == null) return;
+            // respect lock
+            bool locked = (edgeIndex < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[edgeIndex];
+            if (locked) return;
+
+            // For Triangle and Trapezoid: always try atomic application using TrySetEdgeLengths
+            if (_currentShape is TriangleShape || _currentShape is TrapezoidShape)
+            {
+                double[] lengths = new double[_currentShape.Vertices.Length];
+                for (int i = 0; i < lengths.Length; i++) lengths[i] = _currentShape.GetEdgeLength(i);
+                // override with pending values (including the current one)
+                for (int i = 0; i < _pendingEdgeLengths.Count && i < lengths.Length; i++)
+                {
+                    if (_pendingEdgeLengths[i].HasValue)
+                        lengths[i] = _pendingEdgeLengths[i].Value;
+                }
+
+                // Ensure the just-edited value is included
+                if (edgeIndex >= 0 && edgeIndex < lengths.Length)
+                    lengths[edgeIndex] = value;
+
+                if (_currentShape.TrySetEdgeLengths(lengths))
+                {
+                    RedrawPreservingAnchor();
+                    // clear applied pending entries
+                    for (int i = 0; i < _pendingEdgeLengths.Count && i < lengths.Length; i++) _pendingEdgeLengths[i] = null;
+                    return;
+                }
+                else
+                {
+                    // atomic apply failed - do not change geometry; leave user input visible
+                    return;
+                }
+            }
+
+            // Single-edge change for other shapes: apply directly using SetEdgeLength
+            _currentShape.SetEdgeLength(edgeIndex, value);
+            RedrawPreservingAnchor();
         }
 
         private void ApplyEdgeLengths_Click(object sender, RoutedEventArgs e)
         {
             if (_currentShape == null) return;
 
-            // Применяем все введённые значения к рёбрам разом
-            for (int i = 0; i < _edgeLengthBoxes.Count; i++)
+            int n = _edgeLengthBoxes.Count;
+            // Собираем введённые значения
+            double[] lengths = new double[_currentShape.Vertices.Length];
+            bool anyInvalid = false;
+            for (int i = 0; i < _currentShape.Vertices.Length; i++)
             {
-                if (i >= _currentShape.Vertices.Length) continue;
-
-                // Учитываем блокировку ребра
-                bool locked = (i < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[i];
-                if (locked) continue;
-
-                var tb = _edgeLengthBoxes[i];
-                if (double.TryParse(tb.Text, out double newLength) && newLength > 0)
+                if (i < _edgeLengthBoxes.Count && double.TryParse(_edgeLengthBoxes[i].Text, out double v) && v > 0)
+                    lengths[i] = v;
+                else
                 {
-                    _currentShape.SetEdgeLength(i, newLength);
+                    lengths[i] = _currentShape.GetEdgeLength(i);
+                }
+            }
+
+            // Если фигура поддерживает атомарное применение (треугольник/трапеция) — попробуем TrySetEdgeLengths
+            if (_currentShape is TriangleShape || _currentShape is TrapezoidShape)
+            {
+                if (!_currentShape.TrySetEdgeLengths(lengths))
+                {
+                    // Невозможно применить набор — ничего не меняем
+                    // Оставляем введённые значения видимыми, не перезаписываем их
+                    return;
+                }
+            }
+            else
+            {
+                // Иначе применяем по одному, учитывая блокировки
+                for (int i = 0; i < _edgeLengthBoxes.Count; i++)
+                {
+                    if (i >= _currentShape.Vertices.Length) continue;
+
+                    bool locked = (i < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[i];
+                    if (locked) continue;
+
+                    var tb = _edgeLengthBoxes[i];
+                    if (double.TryParse(tb.Text, out double newLength) && newLength > 0)
+                    {
+                        _currentShape.SetEdgeLength(i, newLength);
+                    }
                 }
             }
 
@@ -1344,6 +1452,10 @@ namespace ShapeEditor
 
             for (int i = 0; i < _currentShape.Vertices.Length; i++)
                 worldPoints.Add(GetVertexWorldPosition(_currentShape, _currentShapeVisual, i));
+
+            // Защита: если нет вершин, возвращаем значения по умолчанию
+            if (worldPoints.Count == 0)
+                return (new Point(0, 0), new Point(0, 0));
 
             double minX = worldPoints.Min(p => p.X);
             double minY = worldPoints.Min(p => p.Y);

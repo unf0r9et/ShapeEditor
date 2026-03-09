@@ -178,7 +178,7 @@ namespace ShapeEditor
             return (p - closest).Length;
         }
 
-        private static bool SegmentsIntersect(Point a1, Point a2, Point b1, Point b2)
+        protected static bool SegmentsIntersect(Point a1, Point a2, Point b1, Point b2)
         {
             bool OnSegment(Point p, Point q, Point r)
             {
@@ -208,7 +208,7 @@ namespace ShapeEditor
             return false;
         }
 
-        private bool IsSimplePolygon(Point[] verts)
+        protected bool IsSimplePolygon(Point[] verts)
         {
             int n = verts.Length;
             for (int i = 0; i < n; i++)
@@ -278,7 +278,7 @@ namespace ShapeEditor
         /// <summary>
         /// Изменяет длину ребра, перемещая вторую вершину (конец ребра)
         /// </summary>
-        public void SetEdgeLength(int edgeIndex, double newLength)
+        public virtual void SetEdgeLength(int edgeIndex, double newLength)
         {
             if (edgeIndex < 0 || edgeIndex >= Vertices.Length || newLength <= 0)
                 return;
@@ -289,63 +289,8 @@ namespace ShapeEditor
             if (EdgeLengthLocked != null && edgeIndex < EdgeLengthLocked.Count && EdgeLengthLocked[edgeIndex])
                 return;
 
-            // Специализированная логика для прямоугольника:
-            // сохраняем прямоугольную форму (прямые углы) и просто меняем ширину/высоту,
-            // чтобы при одинаковых длинах противоположных сторон не получался параллелограмм.
-            if (this is RectangleShape && n == 4)
-            {
-                // Векторы текущих рёбер
-                Vector e0 = Vertices[1] - Vertices[0]; // "ширина"
-                Vector e1 = Vertices[2] - Vertices[1]; // "высота"
-
-                double currentWidth = e0.Length;
-                double currentHeight = e1.Length;
-                if (currentWidth < 1e-6 || currentHeight < 1e-6)
-                    return;
-
-                double targetWidth = currentWidth;
-                double targetHeight = currentHeight;
-
-                // Если редактируем верхнюю или нижнюю грань — меняем ширину
-                if (edgeIndex == 0 || edgeIndex == 2)
-                    targetWidth = newLength;
-                // Если правую или левую — меняем высоту
-                else if (edgeIndex == 1 || edgeIndex == 3)
-                    targetHeight = newLength;
-
-                if (targetWidth <= 0 || targetHeight <= 0)
-                    return;
-
-                // Центр текущего четырёхугольника в локальных координатах
-                Point c = new Point(
-                    (Vertices[0].X + Vertices[1].X + Vertices[2].X + Vertices[3].X) / 4.0,
-                    (Vertices[0].Y + Vertices[1].Y + Vertices[2].Y + Vertices[3].Y) / 4.0);
-
-                // Ось "ширины" берём по направлению верхнего ребра
-                Vector u = e0;
-                u.Normalize();
-
-                // Ось "высоты" — строго перпендикулярна оси ширины, но ориентируем её
-                // так, чтобы направление было максимально похоже на исходное e1.
-                Vector v = new Vector(-u.Y, u.X); // поворот на +90°
-                if (Vector.Multiply(v, e1) < 0)   // если смотрит "вниз головой" относительно e1
-                    v = -v;
-
-                double halfW = targetWidth / 2.0;
-                double halfH = targetHeight / 2.0;
-
-                Point[] newVertsRect = new Point[4];
-                newVertsRect[0] = c - halfW * u - halfH * v;
-                newVertsRect[1] = c + halfW * u - halfH * v;
-                newVertsRect[2] = c + halfW * u + halfH * v;
-                newVertsRect[3] = c - halfW * u + halfH * v;
-
-                if (!IsSimplePolygon(newVertsRect))
-                    return;
-
-                Vertices = newVertsRect;
-                return;
-            }
+            // Специализированная логика для прямоугольника была перемещена в RectangleShape.
+            // По умолчанию: перемещаем только вторую вершину вдоль текущего направления ребра.
 
             Point p1 = Vertices[edgeIndex];
             Point p2 = Vertices[(edgeIndex + 1) % Vertices.Length];
@@ -372,6 +317,34 @@ namespace ShapeEditor
             }
 
             Vertices[(edgeIndex + 1) % Vertices.Length] = newP2Single;
+        }
+
+        /// <summary>
+        /// Попытаться установить длины всех рёбер одновременно. По умолчанию просто вызывает SetEdgeLength для каждого ребра.
+        /// Возвращает true, если изменение успешно применено (не привело к ошибке), иначе false.
+        /// </summary>
+        public virtual bool TrySetEdgeLengths(double[] lengths)
+        {
+            if (lengths == null || lengths.Length != Vertices.Length) return false;
+
+            // Применяем по очереди к каждому ребру, игнорируя заблокированные
+            for (int i = 0; i < lengths.Length; i++)
+            {
+                if (lengths[i] <= 0) return false;
+                if (EdgeLengthLocked != null && i < EdgeLengthLocked.Count && EdgeLengthLocked[i])
+                    continue;
+            }
+
+            // Клонируем вершины и пробуем применить последовательно, чтобы при ошибке откатить
+            var backup = (Point[])Vertices.Clone();
+            for (int i = 0; i < lengths.Length; i++)
+            {
+                if (EdgeLengthLocked != null && i < EdgeLengthLocked.Count && EdgeLengthLocked[i])
+                    continue;
+                SetEdgeLength(i, lengths[i]);
+            }
+
+            return true;
         }
 
         public virtual Canvas Build(double anchorWorldX, double anchorWorldY)
