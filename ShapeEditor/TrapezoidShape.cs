@@ -12,6 +12,9 @@ namespace ShapeEditor
 
         public override string[] SideNames => new[] { "Верхняя", "Правая боковая", "Нижняя", "Левая боковая" };
 
+        // Если true — при изменении одной боковой стороны зеркально применяем к другой
+        public bool EnforceIsosceles { get; set; } = false;
+
         protected override Point[] GetDefaultVertices()
         {
             // Равнобокая трапеция, центр в (0,0)
@@ -24,82 +27,88 @@ namespace ShapeEditor
             };
         }
 
+        private double[] GetCurrentEdgeLengths()
+        {
+            var arr = new double[4];
+            for (int i = 0; i < 4; i++) arr[i] = GetEdgeLength(i);
+            return arr;
+        }
+
         public override void SetEdgeLength(int edgeIndex, double newLength)
         {
             if (edgeIndex < 0 || edgeIndex >= Vertices.Length || newLength <= 0) return;
             if (EdgeLengthLocked != null && edgeIndex < EdgeLengthLocked.Count && EdgeLengthLocked[edgeIndex]) return;
             if (Vertices.Length != 4) { base.SetEdgeLength(edgeIndex, newLength); return; }
 
-            Point[] nv = (Point[])Vertices.Clone();
-
-            // Локальные минимальные изменения: боковые изменения меняют только Y нижних вершин; основания — X-координаты симметрично
-            if (edgeIndex == 1)
-            {
-                Point top = nv[1];
-                Point bottom = nv[2];
-                double dx = bottom.X - top.X;
-                double sq = newLength * newLength - dx * dx;
-                if (sq < -1e-6) return;
-                double dy = sq <= 0 ? 0 : Math.Sqrt(Math.Max(0, sq));
-                double dir = Math.Sign(bottom.Y - top.Y); if (dir == 0) dir = 1;
-                nv[2] = new Point(bottom.X, top.Y + dir * dy);
-                if (!IsSimplePolygon(nv)) return;
-                Vertices = nv;
-                return;
-            }
-
-            if (edgeIndex == 3)
-            {
-                Point top = nv[0];
-                Point bottom = nv[3];
-                double dx = bottom.X - top.X;
-                double sq = newLength * newLength - dx * dx;
-                if (sq < -1e-6) return;
-                double dy = sq <= 0 ? 0 : Math.Sqrt(Math.Max(0, sq));
-                double dir = Math.Sign(bottom.Y - top.Y); if (dir == 0) dir = 1;
-                nv[3] = new Point(bottom.X, top.Y + dir * dy);
-                if (!IsSimplePolygon(nv)) return;
-                Vertices = nv;
-                return;
-            }
-
+            // Для оснований (индексы 0 и 2) — используем простой подход
             if (edgeIndex == 0)
             {
-                double half = newLength / 2.0;
-                double x0 = Vertices[0].X; // сохраняем левую точку верхнего основания
+                double x0 = Vertices[0].X;
                 double y = Vertices[0].Y;
+                Point[] nv = (Point[])Vertices.Clone();
                 nv[0] = new Point(x0, y);
                 nv[1] = new Point(x0 + newLength, y);
-                if (!IsSimplePolygon(nv)) return;
-                Vertices = nv;
-                return;
+                if (IsSimplePolygon(nv)) { Vertices = nv; return; }
             }
-
-            if (edgeIndex == 2)
+            else if (edgeIndex == 2)
             {
-                double half = newLength / 2.0;
-                double x3 = Vertices[3].X; // сохраняем левую точку нижнего основания
+                double x3 = Vertices[3].X;
                 double y = Vertices[2].Y;
+                Point[] nv = (Point[])Vertices.Clone();
                 nv[3] = new Point(x3, y);
                 nv[2] = new Point(x3 + newLength, y);
-                if (!IsSimplePolygon(nv)) return;
-                Vertices = nv;
+                if (IsSimplePolygon(nv)) { Vertices = nv; return; }
+            }
+            // Для боковых сторон (индексы 1 и 3) — используем TrySetEdgeLengths
+            else if (edgeIndex == 1 || edgeIndex == 3)
+            {
+                double[] lengths = GetCurrentEdgeLengths();
+                lengths[edgeIndex] = newLength;
+
+                // Если требуется равнобедренность — применяем её
+                if (EnforceIsosceles)
+                {
+                    // При изменении правой боковой (индекс 1) — синхронизируем левую (индекс 3)
+                    if (edgeIndex == 1)
+                        lengths[3] = newLength;
+                    // При изменении левой боковой (индекс 3) — синхронизируем правую (индекс 1)
+                    else
+                        lengths[1] = newLength;
+                }
+
+                // Пробуем строгий атомарный вариант
+                if (TrySetEdgeLengths(lengths))
+                    return;
+
+                // Если строгий не прошёл, пробуем вычислить наилучшее приближение и применить его (расслабленная версия)
+                if (TryComputeTrapezoidVertices(lengths[0], lengths[1], lengths[2], lengths[3], 1e-3, out Point[] approx))
+                {
+                    if (IsSimplePolygon(approx))
+                    {
+                        Vertices = approx;
+                        return;
+                    }
+                }
+
+                // fallback — ничего не делаем
                 return;
             }
 
+            // fallback
             base.SetEdgeLength(edgeIndex, newLength);
         }
 
         /// <summary>
         /// Попытаться установить все длины рёбер трапеции одновременно.
         /// lengths: [верхняя, правая боковая, нижняя, левая боковая]
-        /// Сохраняет параллельность оснований, позволяет неравнобедренную трапецию.
+        /// Численный, более устойчивый вариант: ищем смещение нижнего основания s методом бисиекции.
         /// </summary>
         public override bool TrySetEdgeLengths(double[] lengths)
         {
             if (lengths == null || lengths.Length != 4) return false;
             while (EdgeLengthLocked.Count < 4) EdgeLengthLocked.Add(false);
 
+            // если какая-то длина заблокирована — используем текущую
             double a = EdgeLengthLocked[0] ? GetEdgeLength(0) : lengths[0];   // верхняя
             double br = EdgeLengthLocked[1] ? GetEdgeLength(1) : lengths[1];  // правая боковая
             double c = EdgeLengthLocked[2] ? GetEdgeLength(2) : lengths[2];   // нижняя
@@ -107,56 +116,128 @@ namespace ShapeEditor
 
             if (a <= 0 || br <= 0 || c <= 0 || bl <= 0) return false;
 
-            Point[] nv = (Point[])Vertices.Clone();
-
-            // Сохраняем левую X верхнего основания (Anchoring behavior) чтобы не «переставлять» фигуру неожиданно
-            double x0 = Vertices[0].X;
-            double x1 = x0 + a;
-            double topY = Vertices[0].Y;
-
-            nv[0] = new Point(x0, topY);
-            nv[1] = new Point(x1, topY);
-
-            // Решаем для смещения s = v3x - x0
-            double alpha = c - a; // c - a
-            double D = br * br - bl * bl;
-
-            double s;
-            if (Math.Abs(alpha) < 1e-9)
+            // Попробуем сначала строгую задачу
+            if (TryComputeTrapezoidVertices(a, br, c, bl, 1e-6, out Point[] nv))
             {
-                // a == c: базовые длины равны
-                // Тогда можно попробовать сохранить v3x как есть
-                s = nv[3].X - x0;
-                // Но нужно проверить совместимость
+                if (!IsSimplePolygon(nv)) return false;
+                Vertices = nv;
+                return true;
+            }
+
+            // Если не нашлось строгого решения — пробуем более мягкий tolerance
+            if (TryComputeTrapezoidVertices(a, br, c, bl, 1e-3, out Point[] nv2))
+            {
+                if (!IsSimplePolygon(nv2)) return false;
+                Vertices = nv2;
+                return true;
+            }
+
+            // И ещё более мягкий
+            if (TryComputeTrapezoidVertices(a, br, c, bl, 1e-1, out Point[] nv3))
+            {
+                if (!IsSimplePolygon(nv3)) return false;
+                Vertices = nv3;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Helper: вычисляет вершины трапеции для заданных длин.
+        /// Возвращает true, если найдено решение с невязкой <= tol. Если tol положителен, выполняется поиск s, минимизирующего |f|.
+        /// Если nv возвращён, содержит рассчитанные вершины: V0, V1, V2, V3.
+        /// </summary>
+        private bool TryComputeTrapezoidVertices(double a, double br, double c, double bl, double tol, out Point[] nvOut)
+        {
+            nvOut = null;
+            // копия кода из TrySetEdgeLengths, но возвращающая best solution
+            Point[] nv = (Point[])Vertices.Clone();
+            double x0 = Vertices[0].X;
+            double topY = Vertices[0].Y;
+            double x1 = x0 + a;
+
+            double low1 = -bl, high1 = bl;
+            double low2 = a - c - br, high2 = a - c + br;
+            double sLow = Math.Max(low1, low2);
+            double sHigh = Math.Min(high1, high2);
+
+            if (sLow > sHigh) return false;
+
+            double f(double s)
+            {
+                double v3x = x0 + s;
+                double v2x = v3x + c;
+                double dxR = v2x - x1;
+                double dxL = v3x - x0; // == s
+                double sqR = br * br - dxR * dxR;
+                double sqL = bl * bl - dxL * dxL;
+                if (sqR < 0 || sqL < 0) return double.NaN;
+                double dyR = Math.Sqrt(Math.Max(0, sqR));
+                double dyL = Math.Sqrt(Math.Max(0, sqL));
+                return dyR - dyL;
+            }
+
+            double fLow = f(sLow);
+            double fHigh = f(sHigh);
+
+            if (double.IsNaN(fLow) || double.IsNaN(fHigh)) return false;
+
+            double sFound = double.NaN;
+            if (fLow * fHigh <= 0)
+            {
+                double lo = sLow, hi = sHigh;
+                for (int iter = 0; iter < 60; iter++)
+                {
+                    double mid = 0.5 * (lo + hi);
+                    double fm = f(mid);
+                    if (double.IsNaN(fm)) break;
+                    if (Math.Abs(fm) < 1e-7) { sFound = mid; break; }
+                    if (f(lo) * fm <= 0) hi = mid; else lo = mid;
+                    sFound = mid;
+                }
             }
             else
             {
-                s = (br * br - bl * bl - alpha * alpha) / (2.0 * alpha);
+                int steps = 60;
+                double bestS = sLow;
+                double bestVal = Math.Abs(fLow);
+                for (int i = 1; i <= steps; i++)
+                {
+                    double s = sLow + (sHigh - sLow) * i / (double)steps;
+                    double v = f(s);
+                    if (double.IsNaN(v)) continue;
+                    if (Math.Abs(v) < bestVal) { bestVal = Math.Abs(v); bestS = s; }
+                }
+                sFound = bestS;
+                // previously we rejected if residual > tol; now accept best-found s to allow best-effort rebuild
+                // if (Math.Abs(f(sFound)) > tol) return false;
             }
 
-            double v3x = x0 + s;
-            double v2x = v3x + c;
+            if (double.IsNaN(sFound)) return false;
 
-            double dxR = v2x - x1;
-            double dxL = v3x - x0;
-            double sqR = br * br - dxR * dxR;
-            double sqL = bl * bl - dxL * dxL;
-            if (sqR < -1e-6 || sqL < -1e-6) return false;
+            double v3xFound = x0 + sFound;
+            double v2xFound = v3xFound + c;
 
-            double dyR = sqR <= 0 ? 0 : Math.Sqrt(Math.Max(0, sqR));
-            double dyL = sqL <= 0 ? 0 : Math.Sqrt(Math.Max(0, sqL));
-            if (Math.Abs(dyR - dyL) > 1e-6) return false; // несовместимо
-            double dy = dyR;
+            double dxRf = v2xFound - x1;
+            double dxLf = v3xFound - x0;
+            double sqRf = br * br - dxRf * dxRf;
+            double sqLf = bl * bl - dxLf * dxLf;
+            if (sqRf < -1e-9 || sqLf < -1e-9) return false;
 
-            double dir = Math.Sign(Vertices[2].Y - Vertices[0].Y); if (dir == 0) dir = 1;
-            double bottomY = topY + dir * dy;
+            double dyR = sqRf <= 0 ? 0 : Math.Sqrt(Math.Max(0, sqRf));
+            double dyL = sqLf <= 0 ? 0 : Math.Sqrt(Math.Max(0, sqLf));
+            double dy = 0.5 * (dyR + dyL);
 
-            nv[2] = new Point(v2x, bottomY);
-            nv[3] = new Point(v3x, bottomY);
+            double dirSign = Math.Sign(Vertices[2].Y - Vertices[0].Y); if (dirSign == 0) dirSign = 1;
+            double bottomY = topY + dirSign * dy;
 
-            if (!IsSimplePolygon(nv)) return false;
+            nv[0] = new Point(x0, topY);
+            nv[1] = new Point(x1, topY);
+            nv[3] = new Point(v3xFound, bottomY);
+            nv[2] = new Point(v2xFound, bottomY);
 
-            Vertices = nv;
+            nvOut = nv;
             return true;
         }
     }

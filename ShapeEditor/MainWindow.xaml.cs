@@ -68,6 +68,7 @@ namespace ShapeEditor
         // Длины рёбер (граней)
         private List<TextBox> _edgeLengthBoxes = new();
         private List<CheckBox> _edgeLockBoxes = new();
+        private CheckBox _isoscelesCheckBox;
 
         // Флаг, чтобы отличать программное обновление полей длины рёбер от пользовательского ввода
         private bool _isUpdatingEdgeLengthText;
@@ -322,7 +323,7 @@ namespace ShapeEditor
                 // Не трогаем поле, если пользователь сейчас печатает в нём
                 bool hasFocus = _edgeLengthBoxes[i].IsKeyboardFocused;
                 if (!locked && !hasFocus)
-                    _edgeLengthBoxes[i].Text = length.ToString("0.0");
+                    _edgeLengthBoxes[i].Text = Math.Round(length).ToString("0");
             }
             _isUpdatingEdgeLengthText = false;
 
@@ -642,6 +643,30 @@ namespace ShapeEditor
 
                     _paramsStackPanel.Children.Add(edgeRow);
                     _edgeLengthBoxes.Add(edgeLengthTb);
+                }
+
+                // Чекбокс "Равнобедренная трапеция" только для трапеции
+                if (_currentShape is TrapezoidShape trapezoid)
+                {
+                    var isoscelesCbRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 6) };
+                    _isoscelesCheckBox = new CheckBox
+                    {
+                        Content = "Равнобедренная трапеция",
+                        IsChecked = trapezoid.EnforceIsosceles,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Margin = new Thickness(110, 0, 0, 0),
+                        FontWeight = FontWeights.SemiBold
+                    };
+                    _isoscelesCheckBox.Checked += IsoscelesCheckChanged;
+                    _isoscelesCheckBox.Unchecked += IsoscelesCheckChanged;
+                    isoscelesCbRow.Children.Add(_isoscelesCheckBox);
+                    _paramsStackPanel.Children.Add(isoscelesCbRow);
+
+                    // Если установлено, синхронизируем значения сразу в UI (правая -> левая по умолчанию)
+                    if (trapezoid.EnforceIsosceles)
+                    {
+                        SyncIsoscelesTextboxesFromUI();
+                    }
                 }
 
                 // Кнопка применения новых длин рёбер
@@ -1062,15 +1087,30 @@ namespace ShapeEditor
             if (sender is not TextBox tb || !int.TryParse(tb.Tag?.ToString(), out int edgeIndex)) return;
             if (_isUpdatingEdgeLengthText) return;
 
-            // Сохраняем введённое значение, но не применяем сразу — дождёмся LostFocus или Enter
-            if (double.TryParse(tb.Text, out double v) && v > 0)
+            // Сохраняем введённое целое значение
+            if (int.TryParse(tb.Text, out int v) && v > 0)
             {
                 while (_pendingEdgeLengths.Count <= edgeIndex) _pendingEdgeLengths.Add(null);
-                _pendingEdgeLengths[edgeIndex] = v;
+                _pendingEdgeLengths[edgeIndex] = v; // сохраняем как число (целое в double)
+
+                // Если это трапеция и включена равнобедренность — синхронизируем парную сторону (1 <-> 3)
+                if (_currentShape is TrapezoidShape trap && trap.EnforceIsosceles && (edgeIndex == 1 || edgeIndex == 3))
+                {
+                    int partner = edgeIndex == 1 ? 3 : 1;
+                    bool partnerLocked = (partner < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[partner];
+                    if (!partnerLocked && partner < _edgeLengthBoxes.Count)
+                    {
+                        _isUpdatingEdgeLengthText = true;
+                        _edgeLengthBoxes[partner].Text = v.ToString();
+                        _isUpdatingEdgeLengthText = false;
+
+                        while (_pendingEdgeLengths.Count <= partner) _pendingEdgeLengths.Add(null);
+                        _pendingEdgeLengths[partner] = v;
+                    }
+                }
             }
             else
             {
-                // если ввод некорректен, сбрасываем pending
                 if (_pendingEdgeLengths.Count > edgeIndex)
                     _pendingEdgeLengths[edgeIndex] = null;
             }
@@ -1124,6 +1164,19 @@ namespace ShapeEditor
                 if (edgeIndex >= 0 && edgeIndex < lengths.Length)
                     lengths[edgeIndex] = value;
 
+                // Если трапеция и включена равнобедренность — зеркалим при возможности
+                if (_currentShape is TrapezoidShape trap && trap.EnforceIsosceles)
+                {
+                    int partner = (edgeIndex == 1) ? 3 : (edgeIndex == 3 ? 1 : -1);
+                    if (partner >= 0)
+                    {
+                        // если партнёр не зафиксирован — синхронизируем
+                        bool partnerLocked = (partner < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[partner];
+                        if (!partnerLocked)
+                            lengths[partner] = lengths[edgeIndex];
+                    }
+                }
+
                 if (_currentShape.TrySetEdgeLengths(lengths))
                 {
                     RedrawPreservingAnchor();
@@ -1150,14 +1203,34 @@ namespace ShapeEditor
             int n = _edgeLengthBoxes.Count;
             // Собираем введённые значения
             double[] lengths = new double[_currentShape.Vertices.Length];
-            bool anyInvalid = false;
             for (int i = 0; i < _currentShape.Vertices.Length; i++)
             {
-                if (i < _edgeLengthBoxes.Count && double.TryParse(_edgeLengthBoxes[i].Text, out double v) && v > 0)
+                if (i < _edgeLengthBoxes.Count && int.TryParse(_edgeLengthBoxes[i].Text, out int v) && v > 0)
                     lengths[i] = v;
                 else
-                {
                     lengths[i] = _currentShape.GetEdgeLength(i);
+            }
+
+            // If trapezoid with enforce isosceles, mirror sides
+            if (_currentShape is TrapezoidShape trap && trap.EnforceIsosceles)
+            {
+                // prefer right side value if present, otherwise left
+                int rightIdx = 1, leftIdx = 3;
+                bool leftLocked = (leftIdx < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[leftIdx];
+                bool rightLocked = (rightIdx < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[rightIdx];
+
+                if (!leftLocked && !rightLocked)
+                {
+                    if (int.TryParse(_edgeLengthBoxes[rightIdx].Text, out int vr)) lengths[leftIdx] = vr;
+                    else if (int.TryParse(_edgeLengthBoxes[leftIdx].Text, out int vl)) lengths[rightIdx] = vl;
+                }
+                else if (!leftLocked && rightLocked)
+                {
+                    if (int.TryParse(_edgeLengthBoxes[rightIdx].Text, out int vr)) lengths[leftIdx] = vr;
+                }
+                else if (!rightLocked && leftLocked)
+                {
+                    if (int.TryParse(_edgeLengthBoxes[leftIdx].Text, out int vl)) lengths[rightIdx] = vl;
                 }
             }
 
@@ -1194,13 +1267,74 @@ namespace ShapeEditor
                 RefreshParamsPanelValues();
         }
 
-        private void EdgeLockChanged(object sender, RoutedEventArgs e)
+        private void IsoscelesCheckChanged(object? sender, RoutedEventArgs e)
         {
-            if (sender is not CheckBox cb || !int.TryParse(cb.Tag?.ToString(), out int idx)) return;
-            bool isLocked = cb.IsChecked == true;
-            while (_currentShape.EdgeLengthLocked.Count <= idx)
-                _currentShape.EdgeLengthLocked.Add(false);
-            _currentShape.EdgeLengthLocked[idx] = isLocked;
+            if (!(_currentShape is TrapezoidShape trap)) return;
+            bool isChecked = _isoscelesCheckBox?.IsChecked == true;
+            trap.EnforceIsosceles = isChecked;
+
+            // При включении — синхронизируем значения боковых сторон в UI (при условии, что сторона не заблокирована)
+            if (isChecked)
+            {
+                SyncIsoscelesTextboxesFromUI();
+            }
+        }
+
+        private void SyncIsoscelesTextboxesFromUI()
+        {
+            if (_edgeLengthBoxes == null || _edgeLengthBoxes.Count < 4) return;
+            if (!(_currentShape is TrapezoidShape)) return;
+
+            int rightIdx = 1, leftIdx = 3;
+            bool leftLocked = (leftIdx < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[leftIdx];
+            bool rightLocked = (rightIdx < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[rightIdx];
+
+            // prefer right value; if not a valid number, try left
+            if (!rightLocked && !leftLocked)
+            {
+                if (int.TryParse(_edgeLengthBoxes[rightIdx].Text, out int v))
+                {
+                    _isUpdatingEdgeLengthText = true;
+                    _edgeLengthBoxes[leftIdx].Text = v.ToString();
+                    _isUpdatingEdgeLengthText = false;
+
+                    while (_pendingEdgeLengths.Count <= leftIdx) _pendingEdgeLengths.Add(null);
+                    _pendingEdgeLengths[leftIdx] = v;
+                }
+                else if (int.TryParse(_edgeLengthBoxes[leftIdx].Text, out int v2))
+                {
+                    _isUpdatingEdgeLengthText = true;
+                    _edgeLengthBoxes[rightIdx].Text = v2.ToString();
+                    _isUpdatingEdgeLengthText = false;
+
+                    while (_pendingEdgeLengths.Count <= rightIdx) _pendingEdgeLengths.Add(null);
+                    _pendingEdgeLengths[rightIdx] = v2;
+                }
+            }
+            else if (!leftLocked && rightLocked)
+            {
+                if (int.TryParse(_edgeLengthBoxes[rightIdx].Text, out int v))
+                {
+                    _isUpdatingEdgeLengthText = true;
+                    _edgeLengthBoxes[leftIdx].Text = v.ToString();
+                    _isUpdatingEdgeLengthText = false;
+
+                    while (_pendingEdgeLengths.Count <= leftIdx) _pendingEdgeLengths.Add(null);
+                    _pendingEdgeLengths[leftIdx] = v;
+                }
+            }
+            else if (!rightLocked && leftLocked)
+            {
+                if (int.TryParse(_edgeLengthBoxes[leftIdx].Text, out int v))
+                {
+                    _isUpdatingEdgeLengthText = true;
+                    _edgeLengthBoxes[rightIdx].Text = v.ToString();
+                    _isUpdatingEdgeLengthText = false;
+
+                    while (_pendingEdgeLengths.Count <= rightIdx) _pendingEdgeLengths.Add(null);
+                    _pendingEdgeLengths[rightIdx] = v;
+                }
+            }
         }
 
         private void VertexX_TextChanged(object sender, TextChangedEventArgs e)
@@ -1463,6 +1597,15 @@ namespace ShapeEditor
             double maxY = worldPoints.Max(p => p.Y);
 
             return (new Point(minX, minY), new Point(maxX, maxY));
+        }
+
+        private void EdgeLockChanged(object sender, RoutedEventArgs e)
+        {
+            if (sender is not CheckBox cb || !int.TryParse(cb.Tag?.ToString(), out int idx)) return;
+            bool isLocked = cb.IsChecked == true;
+            while (_currentShape.EdgeLengthLocked.Count <= idx)
+                _currentShape.EdgeLengthLocked.Add(false);
+            _currentShape.EdgeLengthLocked[idx] = isLocked;
         }
 
 
