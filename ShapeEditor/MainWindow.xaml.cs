@@ -76,6 +76,21 @@ namespace ShapeEditor
         // Отложенные значения, введённые пользователем, применяются по потере фокуса или по кнопке Применить
         private List<double?> _pendingEdgeLengths = new();
 
+        // Добавлено в начало класса MainWindow (поля для режима создания кастомной фигуры)
+        private bool _isCreatingCustomShape = false;
+        private CustomShape _creatingCustomShape = null;
+        private int _creatingNextIndex = 0;
+
+        // Контролы панели параметров для создания сегмента
+        private TextBox _newSegmentLengthBox;
+        private TextBox _newSegmentAngleBox;
+        private Button _setSegmentButton;
+        private Button _closeShapeButton;
+        private Button _cancelCreateButton;
+
+        // Визуал подсветки редактируемого (или последнего) сегмента
+        private System.Windows.Shapes.Shape _segmentHighlight = null;
+        private UIElement _segmentHighlightContainer = null;
 
         public MainWindow()
         {
@@ -100,7 +115,7 @@ namespace ShapeEditor
             double dx = v.X - anchor.X;
             double dy = v.Y - anchor.Y;
             double rotatedX = anchor.X + dx * cos - dy * sin;
-            double rotatedY = anchor.Y + dx * sin + dy * cos;
+            double rotatedY = anchor.X + dx * sin + dy * cos; // исправлено здесь
 
             // 2. Масштабирование
             double scaledX = rotatedX * shape.Scale;
@@ -117,12 +132,59 @@ namespace ShapeEditor
                              canvasTop + scaledY - minY);
         }
 
-
         private void AddRectangle(object sender, RoutedEventArgs e) => AddShape(new RectangleShape());
         private void AddTriangle(object sender, RoutedEventArgs e) => AddShape(new TriangleShape());
         private void AddTrapezoid(object sender, RoutedEventArgs e) => AddShape(new TrapezoidShape());
         private void AddCircle(object sender, RoutedEventArgs e) => AddShape(new CircleShape());
         private void AddHexagon(object sender, RoutedEventArgs e) => AddShape(new HexagonShape());
+        private void AddCustomShape(object sender, RoutedEventArgs e)
+        {
+            // Начинаем интерактивное создание кастомной фигуры
+            var custom = new CustomShape();
+            custom.Scale = 1.0;
+            custom.Angle = 0;
+            custom.Fill = Brushes.Transparent;
+
+            // Добавляем в списки и создаём пустой визуал в центре
+            DrawCanvas.UpdateLayout();
+            var visual = CreateShapeVisual(custom, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
+            DrawCanvas.Children.Add(visual);
+            _allShapes.Add(custom);
+            _allShapeVisuals.Add(visual);
+
+            // Ставим в режим создания
+            _isCreatingCustomShape = true;
+            _creatingCustomShape = custom;
+            _creatingNextIndex = 0;
+
+            // Выбираем этот визуал — чтобы в панели отобразились элементы создания
+            SelectShape(visual);
+        }
+
+        private void AddCompoundShape(object sender, RoutedEventArgs e)
+        {
+            var compound = new CompoundShape();
+
+            // Добавим одну дочернюю фигуру по умолчанию
+            var rect = new RectangleShape();
+            rect.Fill = Brushes.Transparent;
+            rect.SideColors.Clear();
+            rect.SideThickness.Clear();
+            for (int i = 0; i < rect.SidesCount; i++)
+            {
+                rect.SideColors.Add(Brushes.Black);
+                rect.SideThickness.Add(3.0);
+            }
+
+            compound.AddChildShape(rect);
+
+            var visual = CreateShapeVisual(compound, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
+            DrawCanvas.Children.Add(visual);
+            _allShapes.Add(compound);
+            _allShapeVisuals.Add(visual);
+
+            SelectShape(visual);
+        }
 
         private void DrawCanvas_BackgroundClick(object sender, MouseButtonEventArgs e)
         {
@@ -266,7 +328,7 @@ namespace ShapeEditor
             Point worldAnchor = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
             bool wasSelected = (_selectedShapeVisual == _currentShapeVisual);
 
-            // Удаляем старый Canvas
+            // Удаляем старый Canvas (тот, который сейчас в _currentShapeVisual)
             if (DrawCanvas.Children.Contains(_currentShapeVisual))
                 DrawCanvas.Children.Remove(_currentShapeVisual);
 
@@ -278,7 +340,13 @@ namespace ShapeEditor
             DrawCanvas.Children.Add(newVisual);
 
             // 🔴 ВАЖНО: обновляем ссылки
+            // Заменяем ссылку на текущий визуал
             _currentShapeVisual = newVisual;
+
+            // Если модель присутствует в списке всех фигур — обновляем соответствующий визуал в _allShapeVisuals
+            int idx = _allShapes.IndexOf(_currentShape);
+            if (idx >= 0)
+                _allShapeVisuals[idx] = newVisual;
 
             if (wasSelected)
             {
@@ -380,8 +448,6 @@ namespace ShapeEditor
                 }
             }
         }
-
-
 
         private void VertexLocalCoordinate_TextChanged(object sender, TextChangedEventArgs e)
         {
@@ -516,6 +582,7 @@ namespace ShapeEditor
                     Tag = i
                 };
                 swatch.MouseLeftButtonDown += ColorSwatch_MouseDown;
+                swatch.MouseLeftButtonDown += (s, ev) => UpdateCustomSegmentHighlight(i);
                 _colorSwatches.Add(swatch);
 
                 var thickLabel = new TextBlock
@@ -533,6 +600,7 @@ namespace ShapeEditor
                     Tag = i
                 };
                 thickTb.TextChanged += ThicknessTextChanged;
+                thickTb.GotFocus += (s, ev) => UpdateCustomSegmentHighlight(i);
                 _thicknessTextBoxes.Add(thickTb);
 
                 row.Children.Add(colorTb);
@@ -543,6 +611,116 @@ namespace ShapeEditor
                 _paramsStackPanel.Children.Add(row);
             }
 
+            // Для кастомных фигур — добавляем углы между отрезками
+            if (_currentShape is CustomShape customShape)
+            {
+                _paramsStackPanel.Children.Add(new TextBlock
+                {
+                    Text = "Углы между отрезками:",
+                        FontWeight = FontWeights.Bold,
+                    Margin = new Thickness(0, 12, 0, 6)
+                });
+
+                for (int i = 0; i < customShape.Segments.Count; i++)
+                {
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
+
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = $"Угол {i + 1} → {((i + 1) % customShape.Segments.Count) + 1}:",
+                        Width = 150,
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
+
+                    var angleTb = new TextBox
+                    {
+                        Width = 70,
+                        Text = customShape.GetEdgeAngle(i).ToString("0.0"),
+                        Tag = i
+                    };
+
+                    angleTb.LostFocus += (s, ev) =>
+                    {
+                        if (s is TextBox tb && int.TryParse(tb.Tag?.ToString(), out int idx) && double.TryParse(tb.Text, out double ang))
+                        {
+                            customShape.SetEdgeAngle(idx, ang);
+                            RedrawPreservingAnchor();
+                        }
+                    };
+
+                    angleTb.GotFocus += (s, ev) => UpdateCustomSegmentHighlight(i, (i + 1) % customShape.Segments.Count);
+
+                    var lockCb = new CheckBox
+                    {
+                        Content = "Зафиксировать",
+                        Margin = new Thickness(8, 0, 0, 0),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        IsChecked = customShape.Segments[i].AngleLocked,
+                        Tag = i
+                    };
+                    lockCb.Checked += (s, ev) =>
+                    {
+                        if (s is CheckBox cb && int.TryParse(cb.Tag?.ToString(), out int idx) && idx < customShape.Segments.Count)
+                            customShape.Segments[idx].AngleLocked = true;
+                    };
+                    lockCb.Unchecked += (s, ev) =>
+                    {
+                        if (s is CheckBox cb && int.TryParse(cb.Tag?.ToString(), out int idx) && idx < customShape.Segments.Count)
+                            customShape.Segments[idx].AngleLocked = false;
+                    };
+
+                    row.Children.Add(angleTb);
+                    row.Children.Add(lockCb);
+                    _paramsStackPanel.Children.Add(row);
+                }
+            }
+
+            // Добавлено: блок для режима создания кастомной фигуры
+            if (_currentShape is CustomShape sc && _isCreatingCustomShape && sc == _creatingCustomShape)
+            {
+                _paramsStackPanel.Children.Add(new TextBlock
+                {
+                    Text = "Создание кастомной фигуры (пошагово):",
+                    FontWeight = FontWeights.SemiBold,
+                    Margin = new Thickness(0, 8, 0, 6)
+                });
+
+                var inputRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 6) };
+
+                inputRow.Children.Add(new TextBlock { Text = "Длина:", Width = 60, VerticalAlignment = VerticalAlignment.Center });
+                _newSegmentLengthBox = new TextBox { Width = 80, Margin = new Thickness(4, 0, 8, 0), Text = "100" };
+                inputRow.Children.Add(_newSegmentLengthBox);
+
+                inputRow.Children.Add(new TextBlock { Text = "Угол (°):", Width = 70, VerticalAlignment = VerticalAlignment.Center });
+                _newSegmentAngleBox = new TextBox { Width = 80, Margin = new Thickness(4, 0, 8, 0), Text = "0" };
+                inputRow.Children.Add(_newSegmentAngleBox);
+
+                _setSegmentButton = new Button { Content = "Задать сегмент", Margin = new Thickness(6, 0, 0, 0) };
+                _setSegmentButton.Click += OnSetNewSegment;
+                inputRow.Children.Add(_setSegmentButton);
+
+                _paramsStackPanel.Children.Add(inputRow);
+
+                var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 8) };
+                _closeShapeButton = new Button { Content = "Замкнуть фигуру", Background = Brushes.LightGreen, Margin = new Thickness(0, 0, 8, 0) };
+                _closeShapeButton.Click += OnCloseCreatingShape;
+                actionRow.Children.Add(_closeShapeButton);
+
+                _cancelCreateButton = new Button { Content = "Отменить создание", Background = Brushes.LightCoral };
+                _cancelCreateButton.Click += OnCancelCreatingShape;
+                actionRow.Children.Add(_cancelCreateButton);
+
+                _paramsStackPanel.Children.Add(actionRow);
+
+                // Отображаем подсказку о том, какой сегмент редактируется (последний)
+                _paramsStackPanel.Children.Add(new TextBlock
+                {
+                    Text = $"Добавлено сегментов: {sc.Segments.Count}",
+                    Foreground = Brushes.Gray,
+                    Margin = new Thickness(0, 4, 0, 8)
+                });
+            }
+
             // Заливка
             var fillRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 12) };
             fillRow.Children.Add(new TextBlock
@@ -550,7 +728,7 @@ namespace ShapeEditor
                 Text = "Заливка:",
                 Width = 110,
                 VerticalAlignment = VerticalAlignment.Center,
-                FontWeight = FontWeights.SemiBold
+                FontWeight = FontWeights.Bold
             });
 
             _fillTextBox = new TextBox
@@ -578,9 +756,6 @@ namespace ShapeEditor
             fillRow.Children.Add(_fillSwatch);
             _paramsStackPanel.Children.Add(fillRow);
 
-
-
-
             // Длины рёбер (граней)
             if (!isCircle && sides > 0)
             {
@@ -602,7 +777,7 @@ namespace ShapeEditor
                         Text = edgeLabel + ":",
                         Width = 110,
                         VerticalAlignment = VerticalAlignment.Center,
-                        FontWeight = FontWeights.SemiBold
+                        FontWeight = FontWeights.Bold
                     });
 
                     var edgeLengthLabel = new TextBlock
@@ -626,6 +801,7 @@ namespace ShapeEditor
                     edgeLengthTb.TextChanged += EdgeLength_TextChanged;
                     edgeLengthTb.LostFocus += EdgeLength_LostFocus;
                     edgeLengthTb.KeyDown += EdgeLength_KeyDown;
+                    edgeLengthTb.GotFocus += (s, ev) => UpdateCustomSegmentHighlight(i);
                     edgeRow.Children.Add(edgeLengthTb);
 
                     var lockCb = new CheckBox
@@ -655,7 +831,7 @@ namespace ShapeEditor
                         IsChecked = trapezoid.EnforceIsosceles,
                         VerticalAlignment = VerticalAlignment.Center,
                         Margin = new Thickness(110, 0, 0, 0),
-                        FontWeight = FontWeights.SemiBold
+                        FontWeight = FontWeights.Bold
                     };
                     _isoscelesCheckBox.Checked += IsoscelesCheckChanged;
                     _isoscelesCheckBox.Unchecked += IsoscelesCheckChanged;
@@ -696,9 +872,9 @@ namespace ShapeEditor
                 headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });  // Локальные
                 headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });  // Глобальные
 
-                headerGrid.Children.Add(new TextBlock { Text = "Локальные", FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
+                headerGrid.Children.Add(new TextBlock { Text = "Локальные", FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
                 Grid.SetColumn(headerGrid.Children[0], 1);
-                headerGrid.Children.Add(new TextBlock { Text = "Глобальные", FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
+                headerGrid.Children.Add(new TextBlock { Text = "Глобальные", FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
                 Grid.SetColumn(headerGrid.Children[1], 2);
                 _paramsStackPanel.Children.Add(headerGrid);
 
@@ -784,7 +960,7 @@ namespace ShapeEditor
             _paramsStackPanel.Children.Add(new TextBlock
             {
                 Text = "Точка привязки",
-                FontWeight = FontWeights.SemiBold,
+                FontWeight = FontWeights.Bold,
                 Margin = new Thickness(0, 16, 0, 6)
             });
 
@@ -849,7 +1025,7 @@ namespace ShapeEditor
             _paramsStackPanel.Children.Add(new TextBlock
             {
                 Text = "Масштаб и поворот",
-                FontWeight = FontWeights.SemiBold,
+                FontWeight = FontWeights.Bold,
                 Margin = new Thickness(0, 8, 0, 6)
             });
 
@@ -956,14 +1132,11 @@ namespace ShapeEditor
             anglePanel.Children.Add(angleGrid);
             _paramsStackPanel.Children.Add(anglePanel);
 
-
-
-
             // Границы фигуры (мировые координаты)
             _paramsStackPanel.Children.Add(new TextBlock
             {
                 Text = "Границы фигуры (мировые):",
-                FontWeight = FontWeights.SemiBold,
+                FontWeight = FontWeights.Bold,
                 Margin = new Thickness(0, 16, 0, 8)
             });
 
@@ -1015,14 +1188,12 @@ namespace ShapeEditor
             trRow.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(4, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center });
             trRow.Children.Add(_bboxTopRightY);
             _paramsStackPanel.Children.Add(trRow);
-
-
         }
 
         private string GetColorHex(Brush brush)
         {
             if (brush is SolidColorBrush scb)
-                return $"#{scb.Color.A:X2}{scb.Color.R:X2}{scb.Color.G:X2}{scb.Color.B:X2}";
+                return $"#{scb.Color.A:X2}{scb.Color.R:X2}{scb.Color.G:X2}{scb.Color.B}";
             return "#00FFFFFF";
         }
 
@@ -1039,10 +1210,16 @@ namespace ShapeEditor
                 var c = System.Windows.Media.Color.FromArgb(dialog.Color.A, dialog.Color.R, dialog.Color.G, dialog.Color.B);
                 var brush = new SolidColorBrush(c);
 
+                // базовый список цветов
+                while (_currentShape.SideColors.Count <= idx) _currentShape.SideColors.Add(Brushes.Black);
                 _currentShape.SideColors[idx] = brush;
                 swatch.Background = brush;
                 if (idx < _colorTextBoxes.Count)
                     _colorTextBoxes[idx].Text = GetColorHex(brush);
+
+                // если это CustomShape — синхронизируем цвет сегмента
+                if (_currentShape is CustomShape cs && idx < cs.Segments.Count)
+                    cs.Segments[idx].Color = brush;
 
                 RedrawPreservingAnchor();
             }
@@ -1078,6 +1255,11 @@ namespace ShapeEditor
                 while (_currentShape.SideThickness.Count <= idx)
                     _currentShape.SideThickness.Add(3);
                 _currentShape.SideThickness[idx] = v;
+
+                // синхронизация для CustomShape
+                if (_currentShape is CustomShape cs && idx < cs.Segments.Count)
+                    cs.Segments[idx].Thickness = v;
+
                 RedrawPreservingAnchor();
             }
         }
@@ -1387,8 +1569,6 @@ namespace ShapeEditor
             RedrawPreservingAnchor();
         }
 
-
-
         private void WorldAnchorX_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (sender is not TextBox tb || _currentShape == null || _currentShapeVisual == null) return;
@@ -1432,8 +1612,6 @@ namespace ShapeEditor
                 tb.Text = newWorldY.ToString("0");
             }
         }
-
-
 
         // ────────────────────────────────────────────────
         // Перетаскивание фигур и якоря (без изменений)
@@ -1487,21 +1665,30 @@ namespace ShapeEditor
             if (_currentShape == null || _currentShapeVisual == null) return;
             Point worldAnchor = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
             bool wasSelected = (_selectedShapeVisual == _currentShapeVisual);
+
             if (DrawCanvas.Children.Contains(_currentShapeVisual))
                 DrawCanvas.Children.Remove(_currentShapeVisual);
             if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
                 DrawCanvas.Children.Remove(_boundingBoxVisual);
+
             _currentShapeVisual = CreateShapeVisual(_currentShape, worldAnchor.X, worldAnchor.Y);
             DrawCanvas.Children.Add(_currentShapeVisual);
+
+            // Обновляем глобальный список визуалов, если фигура там есть
+            int idx = _allShapes.IndexOf(_currentShape);
+            if (idx >= 0)
+                _allShapeVisuals[idx] = _currentShapeVisual;
+
             if (wasSelected)
             {
                 _selectedShapeVisual = _currentShapeVisual;
                 ShowBoundingBox(_currentShapeVisual);
             }
 
-            // ДОБАВЛЕНО: Обновление панели параметров при перетаскивании якоря
+            // Обновление панели параметров при перетаскивании якоря
             if (_paramsPanelIsOpen) RefreshParamsPanelValues();
 
+            // Восстанавливаем захват мыши для точки якоря
             foreach (UIElement child in _currentShapeVisual.Children)
             {
                 if (child is Ellipse ellipse && ellipse.Tag is string tag && tag == "Anchor")
@@ -1575,8 +1762,6 @@ namespace ShapeEditor
             Application.Current.Shutdown();
         }
 
-
-
         private (Point bl, Point tr) GetBoundingBoxFromVertices()
         {
             if (_currentShape == null || _currentShapeVisual == null)
@@ -1608,8 +1793,220 @@ namespace ShapeEditor
             _currentShape.EdgeLengthLocked[idx] = isLocked;
         }
 
+        private void OnSetNewSegment(object? sender, RoutedEventArgs e)
+        {
+            if (!_isCreatingCustomShape || _creatingCustomShape == null) return;
+            if (!double.TryParse(_newSegmentLengthBox?.Text, out double length) || length <= 0) return;
+            if (!double.TryParse(_newSegmentAngleBox?.Text, out double angle)) angle = 0;
 
+            if (_creatingCustomShape.Segments.Count == 0)
+            {
+                // первый сегмент: угол задаёт направление этого сегмента (InitialDirection)
+                _creatingCustomShape.InitialDirection = angle;
+                _creatingCustomShape.AddSegment(length, 0); // пока angleToNext = 0
+            }
+            else
+            {
+                // угол вводится как угол текущего сегмента относительно предыдущего,
+                // это означает: previous.AngleToNext = angle
+                int prevIdx = _creatingCustomShape.Segments.Count - 1;
+                _creatingCustomShape.Segments[prevIdx].AngleToNext = angle;
+                // добавляем новый сегмент (её AngleToNext пока 0)
+                _creatingCustomShape.AddSegment(length, 0);
+            }
 
+            // Обеспечиваем списки цветов/толщин и синхронизируем в сегменте
+            while (_creatingCustomShape.SideColors.Count < _creatingCustomShape.Segments.Count)
+                _creatingCustomShape.SideColors.Add(Brushes.Black);
+            while (_creatingCustomShape.SideThickness.Count < _creatingCustomShape.Segments.Count)
+                _creatingCustomShape.SideThickness.Add(3.0);
+            var lastIdx = _creatingCustomShape.Segments.Count - 1;
+            _creatingCustomShape.Segments[lastIdx].Color = _creatingCustomShape.SideColors[lastIdx];
+            _creatingCustomShape.Segments[lastIdx].Thickness = _creatingCustomShape.SideThickness[lastIdx];
 
+            // Обновляем визуал и подсветку последнего сегмента
+            // Сохраняем центр якоря: при создании AnchorPoint оставляем в (0,0), а CreateShapeVisual при создании
+            // уже выставлял визуал в центр экрана. После добавления сегментов RedrawPreservingAnchor сохранит позицию.
+            RedrawPreservingAnchor();
+            UpdateCustomSegmentHighlight(_creatingCustomShape.Segments.Count - 1);
+
+            _creatingNextIndex = _creatingCustomShape.Segments.Count;
+        }
+
+        private void OnCloseCreatingShape(object? sender, RoutedEventArgs e)
+        {
+            if (!_isCreatingCustomShape || _creatingCustomShape == null) return;
+            if (_creatingCustomShape.Segments.Count < 2)
+            {
+                MessageBox.Show("Нужно как минимум 2 отрезка, чтобы замкнуть фигуру.");
+                return;
+            }
+
+            // Пересчитываем вершины и берём первую/последнюю
+            var verts = _creatingCustomShape.Vertices;
+            if (verts.Length < 2) return;
+            Point first = verts[0];
+            Point last = verts[verts.Length - 1];
+
+            Vector toFirst = first - last;
+            double len = toFirst.Length;
+            if (len < 1e-6)
+            {
+                _isCreatingCustomShape = false;
+                _creatingCustomShape = null;
+                ClearCustomCreationState();
+                RedrawPreservingAnchor();
+                return;
+            }
+
+            // Получаем направление последнего сегмента
+            double currentAngle = _creatingCustomShape.InitialDirection;
+            for (int i = 0; i < _creatingCustomShape.Segments.Count - 1; i++)
+                currentAngle += _creatingCustomShape.Segments[i].AngleToNext;
+
+            double lastDirRad = currentAngle * Math.PI / 180.0;
+            Vector lastDir = new Vector(Math.Cos(lastDirRad), Math.Sin(lastDirRad));
+            Vector targetDir = toFirst;
+            targetDir.Normalize();
+
+            double dot = Vector.Multiply(lastDir, targetDir);
+            dot = Math.Max(-1.0, Math.Min(1.0, dot));
+            double ang = Math.Acos(dot) * 180.0 / Math.PI;
+            double cross = lastDir.X * targetDir.Y - lastDir.Y * targetDir.X;
+            if (cross < 0) ang = -ang;
+
+            // Устанавливаем угол поворота ПОСЛЕ последнего существующего сегмента
+            int lastSegIdx = _creatingCustomShape.Segments.Count - 1;
+            _creatingCustomShape.Segments[lastSegIdx].AngleToNext = ang;
+
+            // Добавляем последний (замыкающий) сегмент длиной len
+            _creatingCustomShape.AddSegment(len, 0);
+
+            // Синхронизируем цвета/толщины
+            while (_creatingCustomShape.SideColors.Count < _creatingCustomShape.Segments.Count)
+                _creatingCustomShape.SideColors.Add(Brushes.Black);
+            while (_creatingCustomShape.SideThickness.Count < _creatingCustomShape.Segments.Count)
+                _creatingCustomShape.SideThickness.Add(3.0);
+            for (int i = 0; i < _creatingCustomShape.Segments.Count; i++)
+            {
+                _creatingCustomShape.Segments[i].Color = _creatingCustomShape.SideColors[i];
+                _creatingCustomShape.Segments[i].Thickness = _creatingCustomShape.SideThickness[i];
+            }
+
+            // Центрируем якорь фигуры по её локальным границам
+            var worldAnchor = _creatingCustomShape.GetAnchorWorldPosition(_currentShapeVisual);
+            _creatingCustomShape.CenterAnchorToBounds();
+
+            // Удаляем из холста любые существующие Canvas, связанные с этой моделью (чтобы избежать дубликата)
+            var existing = DrawCanvas.Children.OfType<Canvas>().Where(c => ReferenceEquals(c.Tag, _creatingCustomShape)).ToList();
+            foreach (var c in existing)
+                DrawCanvas.Children.Remove(c);
+
+            // Перерендерим визу и обновим ссылку в списках
+            var newVisual = CreateShapeVisual(_creatingCustomShape, worldAnchor.X, worldAnchor.Y);
+
+            int shapeIndex = _allShapes.IndexOf(_creatingCustomShape);
+            if (shapeIndex >= 0)
+            {
+                // заменяем в списке и добавляем на холст
+                _allShapeVisuals[shapeIndex] = newVisual;
+                DrawCanvas.Children.Add(newVisual);
+                SelectShape(newVisual);
+            }
+            else
+            {
+                // fallback
+                DrawCanvas.Children.Add(newVisual);
+                RedrawPreservingAnchor();
+            }
+
+            // Завершаем режим создания
+            _isCreatingCustomShape = false;
+            _creatingCustomShape = null;
+            ClearCustomCreationState();
+            MessageBox.Show("Фигура замкнута.");
+        }
+
+        private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
+        {
+            if (!_isCreatingCustomShape || _creatingCustomShape == null) return;
+
+            // Удаляем визуал и модель, откатываем
+            var idx = _allShapes.IndexOf(_creatingCustomShape);
+            if (idx >= 0)
+            {
+                var visual = _allShapeVisuals[idx];
+                if (DrawCanvas.Children.Contains(visual)) DrawCanvas.Children.Remove(visual);
+                _allShapes.RemoveAt(idx);
+                _allShapeVisuals.RemoveAt(idx);
+            }
+
+            _isCreatingCustomShape = false;
+            _creatingCustomShape = null;
+            ClearCustomCreationState();
+            ClearSelection();
+        }
+
+        // Помощники — подсветка сегмента и очистка состояния создания
+        private void UpdateCustomSegmentHighlight(params int[] indices)
+        {
+            // Удаляем старую подсветку
+            if (_segmentHighlightContainer != null && _currentShapeVisual != null && _currentShapeVisual.Children.Contains(_segmentHighlightContainer))
+                _currentShapeVisual.Children.Remove(_segmentHighlightContainer);
+            _segmentHighlightContainer = null;
+
+            if (_currentShape == null || _currentShapeVisual == null) return;
+            if (!(_currentShape is CustomShape cs)) return;
+
+            // контейнер для оверлеев
+            var container = new Canvas { IsHitTestVisible = false };
+            bool added = false;
+
+            foreach (int idx in indices.Distinct())
+            {
+                // Ищем Polygon с нужным Tag среди прямых потомков Canvas
+                foreach (var child in _currentShapeVisual.Children.OfType<System.Windows.Shapes.Polygon>())
+                {
+                    if (child.Tag is int t && t == idx)
+                    {
+                        // Копируем точки из найденного Polygon для подсветки
+                        var overlay = new System.Windows.Shapes.Polygon
+                        {
+                            Points = new PointCollection(child.Points),
+                            Stroke = Brushes.OrangeRed,
+                            StrokeThickness = 2,
+                            Fill = Brushes.Transparent,
+                            IsHitTestVisible = false,
+                            Opacity = 0.7
+                        };
+                        container.Children.Add(overlay);
+                        added = true;
+                        break;
+                    }
+                }
+            }
+
+            if (added)
+            {
+                _segmentHighlightContainer = container;
+                _currentShapeVisual.Children.Add(_segmentHighlightContainer);
+            }
+        }
+
+        private void ClearCustomCreationState()
+        {
+            _newSegmentLengthBox = null;
+            _newSegmentAngleBox = null;
+            _setSegmentButton = null;
+            _closeShapeButton = null;
+            _cancelCreateButton = null;
+
+            if (_segmentHighlight != null && _currentShapeVisual != null && _currentShapeVisual.Children.Contains(_segmentHighlight))
+                _currentShapeVisual.Children.Remove(_segmentHighlight);
+            _segmentHighlight = null;
+
+            // перестроим панель параметров (если открыта)
+            if (_paramsPanelIsOpen) RebuildParamsPanel();
+        }
     }
 }

@@ -109,6 +109,30 @@
                                 <TextBlock Text="Шестиугольник" VerticalAlignment="Center" FontSize="16"/>
                             </StackPanel>
                         </Button>
+
+                        <Button Style="{StaticResource MaterialDesignOutlinedButton}"
+                                BorderBrush="{DynamicResource PrimaryHueMidBrush}"
+                                Foreground="{DynamicResource PrimaryHueMidBrush}"
+                                Margin="0,6"
+                                Background="LightBlue"
+                                Height="42"
+                                Click="AddCustomShape">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <TextBlock Text="Кастомная фигура" VerticalAlignment="Center" FontSize="16"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource MaterialDesignOutlinedButton}"
+                                BorderBrush="{DynamicResource PrimaryHueMidBrush}"
+                                Foreground="{DynamicResource PrimaryHueMidBrush}"
+                                Margin="0,6"
+                                Background="LightGreen"
+                                Height="42"
+                                Click="AddCompoundShape">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <TextBlock Text="Комплексная фигура" VerticalAlignment="Center" FontSize="16"/>
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
                 </ScrollViewer>
 
