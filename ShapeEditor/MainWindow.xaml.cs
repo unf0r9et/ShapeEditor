@@ -582,7 +582,11 @@ namespace ShapeEditor
                     Tag = i
                 };
                 swatch.MouseLeftButtonDown += ColorSwatch_MouseDown;
-                swatch.MouseLeftButtonDown += (s, ev) => UpdateCustomSegmentHighlight(i);
+                swatch.MouseLeftButtonDown += (s, ev) =>
+                {
+                    if (swatch.Tag is int idx)
+                        HighlightEdge(idx);
+                };
                 _colorSwatches.Add(swatch);
 
                 var thickLabel = new TextBlock
@@ -600,7 +604,17 @@ namespace ShapeEditor
                     Tag = i
                 };
                 thickTb.TextChanged += ThicknessTextChanged;
-                thickTb.GotFocus += (s, ev) => UpdateCustomSegmentHighlight(i);
+                thickTb.GotFocus += (s, ev) =>
+                {
+                    if (thickTb.Tag is int idx)
+                        HighlightEdge(idx);
+                };
+
+                thickTb.LostFocus += (s, ev) =>
+                {
+                    if (thickTb.Tag is int idx)
+                        HighlightEdge(idx, false);
+                };
                 _thicknessTextBoxes.Add(thickTb);
 
                 row.Children.Add(colorTb);
@@ -801,7 +815,17 @@ namespace ShapeEditor
                     edgeLengthTb.TextChanged += EdgeLength_TextChanged;
                     edgeLengthTb.LostFocus += EdgeLength_LostFocus;
                     edgeLengthTb.KeyDown += EdgeLength_KeyDown;
-                    edgeLengthTb.GotFocus += (s, ev) => UpdateCustomSegmentHighlight(i);
+                    edgeLengthTb.GotFocus += (s, ev) =>
+                    {
+                        if (edgeLengthTb.Tag is int idx)
+                            HighlightEdge(idx);
+                    };
+
+                    edgeLengthTb.LostFocus += (s, ev) =>
+                    {
+                        if (edgeLengthTb.Tag is int idx)
+                            HighlightEdge(idx, false);
+                    };
                     edgeRow.Children.Add(edgeLengthTb);
 
                     var lockCb = new CheckBox
@@ -2007,6 +2031,96 @@ namespace ShapeEditor
 
             // перестроим панель параметров (если открыта)
             if (_paramsPanelIsOpen) RebuildParamsPanel();
+        }
+
+
+        private void HighlightEdge(int edgeIndex, bool highlight = true)
+        {
+            if (_currentShapeVisual == null) return;
+            if (!(_currentShape is CustomShape) && edgeIndex >= _currentShape.SidesCount) return;
+            if (_currentShape is not CustomShape)
+            {
+                // для обычных фигур подсвечиваем весь полигон
+                foreach (var child in _currentShapeVisual.Children.OfType<Shape>())
+                {
+                    if (child is Polygon || child is Polyline)
+                    {
+                        // временно меняем цвет обводки или добавляем glow-эффект
+                        child.Stroke = Brushes.OrangeRed;
+                        child.StrokeThickness += 2;  // или используйте Effect = new DropShadowEffect()
+                                                     // но тогда нужно запоминать оригинальные значения и возвращать при снятии подсветки
+                    }
+                }
+                return;
+            }
+            // Удаляем предыдущую подсветку (если была)
+            if (_segmentHighlightContainer != null && _currentShapeVisual.Children.Contains(_segmentHighlightContainer))
+            {
+                _currentShapeVisual.Children.Remove(_segmentHighlightContainer);
+                _segmentHighlightContainer = null;
+            }
+
+            if (!highlight) return;
+
+            var container = new Canvas { IsHitTestVisible = false };
+            bool found = false;
+
+            // Ищем все полигоны/линии, помеченные индексом ребра
+            foreach (var child in _currentShapeVisual.Children)
+            {
+                if (child is Shape shape && shape.Tag is int tag && tag == edgeIndex)
+                {
+                    Shape overlay;
+
+                    if (shape is Polygon poly)
+                    {
+                        overlay = new Polygon
+                        {
+                            Points = new PointCollection(poly.Points),
+                            Stroke = Brushes.OrangeRed,
+                            StrokeThickness = 4,
+                            Fill = Brushes.Transparent,
+                            Opacity = 0.75,
+                            IsHitTestVisible = false
+                        };
+                    }
+                    else if (shape is Polyline line)
+                    {
+                        overlay = new Polyline
+                        {
+                            Points = new PointCollection(line.Points),
+                            Stroke = Brushes.OrangeRed,
+                            StrokeThickness = 4,
+                            Opacity = 0.85,
+                            IsHitTestVisible = false
+                        };
+                    }
+                    else if (shape is Line ln)
+                    {
+                        overlay = new Line
+                        {
+                            X1 = ln.X1,
+                            Y1 = ln.Y1,
+                            X2 = ln.X2,
+                            Y2 = ln.Y2,
+                            Stroke = Brushes.OrangeRed,
+                            StrokeThickness = 4,
+                            Opacity = 0.85,
+                            IsHitTestVisible = false
+                        };
+                    }
+                    else continue;
+
+                    container.Children.Add(overlay);
+                    found = true;
+                }
+            }
+
+            if (found)
+            {
+                _segmentHighlightContainer = container;
+                _currentShapeVisual.Children.Add(container);
+            }
         }
     }
 }
