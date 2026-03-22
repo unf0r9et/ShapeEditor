@@ -1905,6 +1905,7 @@ namespace ShapeEditor
 
             // Добавляем последний (замыкающий) сегмент длиной len
             _creatingCustomShape.AddSegment(len, 0);
+            _creatingCustomShape.IsClosed = true;
 
             // Синхронизируем цвета/толщины
             while (_creatingCustomShape.SideColors.Count < _creatingCustomShape.Segments.Count)
@@ -1920,6 +1921,7 @@ namespace ShapeEditor
             // Центрируем якорь фигуры по её локальным границам
             var worldAnchor = _creatingCustomShape.GetAnchorWorldPosition(_currentShapeVisual);
             _creatingCustomShape.CenterAnchorToBounds();
+            _creatingCustomShape.IsClosed = true;
 
             // Удаляем из холста любые существующие Canvas, связанные с этой моделью (чтобы избежать дубликата)
             var existing = DrawCanvas.Children.OfType<Canvas>().Where(c => ReferenceEquals(c.Tag, _creatingCustomShape)).ToList();
@@ -2037,23 +2039,8 @@ namespace ShapeEditor
         private void HighlightEdge(int edgeIndex, bool highlight = true)
         {
             if (_currentShapeVisual == null) return;
-            if (!(_currentShape is CustomShape) && edgeIndex >= _currentShape.SidesCount) return;
-            if (_currentShape is not CustomShape)
-            {
-                // для обычных фигур подсвечиваем весь полигон
-                foreach (var child in _currentShapeVisual.Children.OfType<Shape>())
-                {
-                    if (child is Polygon || child is Polyline)
-                    {
-                        // временно меняем цвет обводки или добавляем glow-эффект
-                        child.Stroke = Brushes.OrangeRed;
-                        child.StrokeThickness += 2;  // или используйте Effect = new DropShadowEffect()
-                                                     // но тогда нужно запоминать оригинальные значения и возвращать при снятии подсветки
-                    }
-                }
-                return;
-            }
-            // Удаляем предыдущую подсветку (если была)
+
+            // Удаляем предыдущую подсветку (общая часть для всех типов фигур)
             if (_segmentHighlightContainer != null && _currentShapeVisual.Children.Contains(_segmentHighlightContainer))
             {
                 _currentShapeVisual.Children.Remove(_segmentHighlightContainer);
@@ -2065,14 +2052,14 @@ namespace ShapeEditor
             var container = new Canvas { IsHitTestVisible = false };
             bool found = false;
 
-            // Ищем все полигоны/линии, помеченные индексом ребра
-            foreach (var child in _currentShapeVisual.Children)
+            // Ищем элементы с нужным Tag == edgeIndex
+            foreach (var child in _currentShapeVisual.Children.OfType<Shape>())
             {
-                if (child is Shape shape && shape.Tag is int tag && tag == edgeIndex)
+                if (child.Tag is int tag && tag == edgeIndex)
                 {
                     Shape overlay;
 
-                    if (shape is Polygon poly)
+                    if (child is Polygon poly)
                     {
                         overlay = new Polygon
                         {
@@ -2084,7 +2071,7 @@ namespace ShapeEditor
                             IsHitTestVisible = false
                         };
                     }
-                    else if (shape is Polyline line)
+                    else if (child is Polyline line)
                     {
                         overlay = new Polyline
                         {
@@ -2095,7 +2082,7 @@ namespace ShapeEditor
                             IsHitTestVisible = false
                         };
                     }
-                    else if (shape is Line ln)
+                    else if (child is Line ln)
                     {
                         overlay = new Line
                         {
@@ -2109,7 +2096,25 @@ namespace ShapeEditor
                             IsHitTestVisible = false
                         };
                     }
-                    else continue;
+                    else if (child is Rectangle rect)   // ← добавляем поддержку прямоугольников
+                    {
+                        overlay = new Rectangle
+                        {
+                            Width = rect.Width,
+                            Height = rect.Height,
+                            Stroke = Brushes.OrangeRed,
+                            StrokeThickness = 4,
+                            Fill = Brushes.Transparent,
+                            Opacity = 0.75,
+                            IsHitTestVisible = false
+                        };
+                        Canvas.SetLeft(overlay, Canvas.GetLeft(rect));
+                        Canvas.SetTop(overlay, Canvas.GetTop(rect));
+                    }
+                    else
+                    {
+                        continue;
+                    }
 
                     container.Children.Add(overlay);
                     found = true;
@@ -2121,6 +2126,7 @@ namespace ShapeEditor
                 _segmentHighlightContainer = container;
                 _currentShapeVisual.Children.Add(container);
             }
+            // Если ничего не нашли — ничего не делаем (можно добавить лог/отладку)
         }
     }
 }

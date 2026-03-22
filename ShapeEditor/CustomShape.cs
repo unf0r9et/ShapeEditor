@@ -22,6 +22,7 @@ namespace ShapeEditor
         }
 
         protected override Point[] GetDefaultVertices() => new Point[0];
+        public bool IsClosed { get; set; } = false;
 
         public void AddSegment(double length, double angleToNext = 0)
         {
@@ -193,15 +194,16 @@ namespace ShapeEditor
                 transformed.Add(new Point(rx * Scale, ry * Scale));
             }
 
-            // Detect closed polygon: if last equals first (within eps) then treat as closed polygon
-            bool isClosed = false;
-            if (transformed.Count >= 2)
-            {
-                var first = transformed[0];
-                var last = transformed[transformed.Count - 1];
-                if ((first - last).Length < 1e-6)
-                    isClosed = true;
-            }
+            //// Detect closed polygon: if last equals first (within eps) then treat as closed polygon
+            //bool isClosed = false;
+            //if (transformed.Count >= 2)
+            //{
+            //    var first = transformed[0];
+            //    var last = transformed[transformed.Count - 1];
+            //    if ((first - last).Length < 1e-6)
+            //        isClosed = true;
+            //}
+            bool isClosed = this.IsClosed && transformed.Count >= 3;
 
             // If closed, remove duplicate last for polygon processing
             Point[] verts;
