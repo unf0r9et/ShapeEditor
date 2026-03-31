@@ -17,7 +17,8 @@ namespace ShapeEditor
         // Для CompoungShape вершины генерируются из всех детских фигур
         public CompoundShape()
         {
-            SidesCount = 0; // Комплексная фигура не имеет собственных сторон
+            SidesCount = 0;
+            Fill = Brushes.Transparent; // По умолчанию прозрачный
         }
 
         protected override Point[] GetDefaultVertices() => new Point[0];
@@ -44,31 +45,33 @@ namespace ShapeEditor
         /// <summary>
         /// Обновляет границы на основе всех детских фигур
         /// </summary>
-        private void UpdateBounds()
+        public void UpdateBounds()
         {
             if (ChildShapes.Count == 0)
             {
-                Vertices = new Point[0];
+                MinX = -20; MaxX = 20; MinY = -20; MaxY = 20;
                 return;
             }
 
-            // Собираем все вершины из детских фигур
-            var allVertices = new List<Point>();
+            double minX = double.MaxValue, maxX = double.MinValue;
+            double minY = double.MaxValue, maxY = double.MinValue;
+
             foreach (var child in ChildShapes)
             {
-                if (child.Vertices != null)
-                    allVertices.AddRange(child.Vertices);
+                // У каждой фигуры есть свои MinX/MinY после Build
+                // Но нам нужны координаты относительно якоря ГРУППЫ
+                minX = Math.Min(minX, child.AnchorPoint.X + child.MinX);
+                maxX = Math.Max(maxX, child.AnchorPoint.X + child.MaxX);
+                minY = Math.Min(minY, child.AnchorPoint.Y + child.MinY);
+                maxY = Math.Max(maxY, child.AnchorPoint.Y + child.MaxY);
             }
 
-            if (allVertices.Count == 0)
-            {
-                Vertices = new Point[0];
-            }
-            else
-            {
-                Vertices = allVertices.ToArray();
-            }
+            MinX = minX - AnchorPoint.X;
+            MaxX = maxX - AnchorPoint.X;
+            MinY = minY - AnchorPoint.Y;
+            MaxY = maxY - AnchorPoint.Y;
         }
+
 
         /// <summary>
         /// Проверка, находится ли точка внутри ЛЮБОЙ детской фигуры
@@ -83,71 +86,46 @@ namespace ShapeEditor
         /// </summary>
         public override Canvas Build(double anchorWorldX, double anchorWorldY)
         {
-            Canvas container = new Canvas { Width = 1, Height = 1 };
+            // Сначала считаем границы всех детей
+            UpdateBounds();
+
+            // Создаем контейнер. ВАЖНО: он сам по себе не имеет размера для клика, 
+            // поэтому мы добавим прозрачную подложку в методе MainWindow
+            Canvas container = new Canvas { IsHitTestVisible = true };
 
             foreach (var child in ChildShapes)
             {
-                // Применяем масштаб и поворот комплекса к каждому ребёнку
-                double childScale = child.Scale * Scale;
-                double childAngle = child.Angle + Angle;
-
-                // Детская точка привязки в мировых координатах комплекса
-                // Сначала применяем трансформацию к якорю ребёнка
-                double dxChild = child.AnchorPoint.X - AnchorPoint.X;
-                double dyChild = child.AnchorPoint.Y - AnchorPoint.Y;
-
+                // Масштабируем и поворачиваем позицию ребенка относительно якоря группы
                 double angleRad = Angle * Math.PI / 180.0;
                 double cos = Math.Cos(angleRad);
                 double sin = Math.Sin(angleRad);
 
-                // Поворачиваем локальное смещение якоря ребёнка
-                double rotatedDx = dxChild * cos - dyChild * sin;
-                double rotatedDy = dxChild * sin + dyChild * cos;
+                // Вектор от якоря группы до якоря ребенка
+                double dx = child.AnchorPoint.X - AnchorPoint.X;
+                double dy = child.AnchorPoint.Y - AnchorPoint.Y;
 
-                // Масштабируем
-                rotatedDx *= Scale;
-                rotatedDy *= Scale;
+                // Поворот и масштаб вектора
+                double rx = (dx * cos - dy * sin) * Scale;
+                double ry = (dx * sin + dy * cos) * Scale;
 
-                // Мировая позиция якоря ребёнка
-                double childWorldAnchorX = anchorWorldX + rotatedDx;
-                double childWorldAnchorY = anchorWorldY + rotatedDy;
+                // Мировая позиция якоря ребенка
+                double childWorldX = anchorWorldX + rx;
+                double childWorldY = anchorWorldY + ry;
 
-                // Строим детскую фигуру
-                var childVisual = child.Build(childWorldAnchorX, childWorldAnchorY);
+                // Сохраняем масштаб и угол группы в ребенка (визуально)
+                double originalScale = child.Scale;
+                double originalAngle = child.Angle;
 
-                // Помечаем дочерний visual, чтобы его можно было найти из MainWindow (Tag = соответствующая ShapeBase)
+                child.Scale *= Scale;
+                child.Angle += Angle;
+
+                var childVisual = child.Build(childWorldX, childWorldY);
                 childVisual.Tag = child;
-
                 container.Children.Add(childVisual);
-            }
 
-            // Обновляем границы контейнера
-            if (ChildShapes.Count > 0)
-            {
-                double minX = double.MaxValue, maxX = double.MinValue;
-                double minY = double.MaxValue, maxY = double.MinValue;
-
-                foreach (var child in ChildShapes)
-                {
-                    minX = Math.Min(minX, child.MinX);
-                    maxX = Math.Max(maxX, child.MaxX);
-                    minY = Math.Min(minY, child.MinY);
-                    maxY = Math.Max(maxY, child.MaxY);
-                }
-
-                double width = maxX - minX;
-                double height = maxY - minY;
-
-                container.Width = width > 0 ? width : 1;
-                container.Height = height > 0 ? height : 1;
-
-                MinX = minX;
-                MinY = minY;
-                MaxX = maxX;
-                MaxY = maxY;
-
-                Canvas.SetLeft(container, anchorWorldX - MinX);
-                Canvas.SetTop(container, anchorWorldY - MinY);
+                // Возвращаем настройки ребенка назад, чтобы не испортить модель
+                child.Scale = originalScale;
+                child.Angle = originalAngle;
             }
 
             return container;

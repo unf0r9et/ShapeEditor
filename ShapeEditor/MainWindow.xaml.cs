@@ -92,6 +92,9 @@ namespace ShapeEditor
         private System.Windows.Shapes.Shape _segmentHighlight = null;
         private UIElement _segmentHighlightContainer = null;
 
+        // Поля для работы с комплексными фигурами
+        private CompoundShape _editingParentCompound = null; // Родитель, если мы внутри группы
+        private ShapeBase _childShapeBeforeEdit = null;      // Копия или ссылка для отмены (опционально)
         public MainWindow()
         {
             InitializeComponent();
@@ -164,25 +167,12 @@ namespace ShapeEditor
         private void AddCompoundShape(object sender, RoutedEventArgs e)
         {
             var compound = new CompoundShape();
-
-            // Добавим одну дочернюю фигуру по умолчанию
-            var rect = new RectangleShape();
-            rect.Fill = Brushes.Transparent;
-            rect.SideColors.Clear();
-            rect.SideThickness.Clear();
-            for (int i = 0; i < rect.SidesCount; i++)
-            {
-                rect.SideColors.Add(Brushes.Black);
-                rect.SideThickness.Add(3.0);
-            }
-
-            compound.AddChildShape(rect);
+            // Список пуст изначально!
 
             var visual = CreateShapeVisual(compound, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
             DrawCanvas.Children.Add(visual);
             _allShapes.Add(compound);
             _allShapeVisuals.Add(visual);
-
             SelectShape(visual);
         }
 
@@ -276,25 +266,39 @@ namespace ShapeEditor
                 RebuildParamsPanel();
         }
 
-        private void ShowBoundingBox(Canvas shapeVisual)
+        private void ShowBoundingBox(Canvas visual)
         {
-            var shape = shapeVisual.Tag as ShapeBase;
-            if (shape == null) return;
+            // 1. Сначала ВСЕГДА удаляем старую рамку
+            ClearBoundingBox();
+
+            if (visual == null) return;
 
             _boundingBoxVisual = new Rectangle
             {
-                Width = shapeVisual.Width,
-                Height = shapeVisual.Height,
+                // Берем реальные размеры Canvas
+                Width = visual.ActualWidth > 0 ? visual.ActualWidth : visual.Width,
+                Height = visual.ActualHeight > 0 ? visual.ActualHeight : visual.Height,
                 Stroke = Brushes.DodgerBlue,
-                StrokeThickness = 1,
+                StrokeThickness = 2,
                 StrokeDashArray = new DoubleCollection { 4, 2 },
                 Fill = Brushes.Transparent,
                 IsHitTestVisible = false
             };
 
-            Canvas.SetLeft(_boundingBoxVisual, Canvas.GetLeft(shapeVisual));
-            Canvas.SetTop(_boundingBoxVisual, Canvas.GetTop(shapeVisual));
+            // Привязываем позицию рамки к позиции Canvas
+            Canvas.SetLeft(_boundingBoxVisual, Canvas.GetLeft(visual));
+            Canvas.SetTop(_boundingBoxVisual, Canvas.GetTop(visual));
+
             DrawCanvas.Children.Add(_boundingBoxVisual);
+        }
+
+        private void ClearBoundingBox()
+        {
+            if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
+            {
+                DrawCanvas.Children.Remove(_boundingBoxVisual);
+            }
+            _boundingBoxVisual = null;
         }
 
         private Canvas CreateShapeVisual(ShapeBase shape, double anchorWorldX, double anchorWorldY)
@@ -756,6 +760,92 @@ namespace ShapeEditor
                     Foreground = Brushes.Gray,
                     Margin = new Thickness(0, 4, 0, 8)
                 });
+            }
+
+            // Внутри RebuildParamsPanel, после обработки CustomShape:
+            if (_currentShape is CompoundShape compound)
+            {
+                _paramsStackPanel.Children.Add(new TextBlock
+                {
+                    Text = "Состав группы:",
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 14,
+                    Margin = new Thickness(0, 10, 0, 5)
+                });
+
+                // Кнопки добавления новых фигур в группу
+                var addButtonsRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
+                string[] types = { "Прямоугольник", "Треугольник", "Трапеция", "Круг", "Шестиугольник" };
+                foreach (var type in types)
+                {
+                    var btn = new Button { Content = "+" + type, Margin = new Thickness(2), Padding = new Thickness(4, 2, 4, 2) };
+                    btn.Click += (s, e) => { AddChildToCompound(compound, type); };
+                    addButtonsRow.Children.Add(btn);
+                }
+                _paramsStackPanel.Children.Add(addButtonsRow);
+
+                // Список существующих фигур в группе
+                var listContainer = new StackPanel();
+                for (int i = 0; i < compound.ChildShapes.Count; i++)
+                {
+                    var child = compound.ChildShapes[i];
+                    int index = i;
+
+                    var row = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    // Внутри цикла создания списка фигур:
+                    var nameBtn = new Button
+                    {
+                        Content = $"{index + 1}. {child.GetType().Name.Replace("Shape", "")}",
+                        HorizontalContentAlignment = HorizontalAlignment.Left,
+                        Background = Brushes.White,
+                        Foreground = Brushes.Black, // Явный цвет текста
+                        BorderBrush = Brushes.LightGray,
+                        BorderThickness = new Thickness(1),
+                        Padding = new Thickness(5, 2, 5, 2)
+                    };
+
+                    // Подсветка при клике на имя в списке
+                    nameBtn.Click += (s, e) => { HighlightChildInCompound(compound, index); };
+
+                    var editBtn = new Button { Content = "✎", Margin = new Thickness(5, 0, 0, 0), Width = 25 };
+                    editBtn.Click += (s, e) => { StartEditingChild(compound, child); };
+
+                    var delBtn = new Button { Content = "X", Margin = new Thickness(5, 0, 0, 0), Width = 25, Foreground = Brushes.Red };
+                    delBtn.Click += (s, e) => {
+                        compound.RemoveChildShape(child);
+                        RedrawPreservingAnchor();
+                        RebuildParamsPanel();
+                    };
+
+                    Grid.SetColumn(nameBtn, 0);
+                    Grid.SetColumn(editBtn, 1);
+                    Grid.SetColumn(delBtn, 2);
+                    row.Children.Add(nameBtn);
+                    row.Children.Add(editBtn);
+                    row.Children.Add(delBtn);
+
+                    listContainer.Children.Add(row);
+                }
+                _paramsStackPanel.Children.Add(listContainer);
+            }
+
+            // Если мы сейчас редактируем "ребёнка", добавим кнопку "Вернуться в группу"
+            if (_editingParentCompound != null)
+            {
+                var saveBtn = new Button
+                {
+                    Content = "СОХРАНИТЬ И ВЕРНУТЬСЯ В ГРУППУ",
+                    Height = 40,
+                    Margin = new Thickness(0, 20, 0, 10),
+                    Background = Brushes.LightGreen,
+                    FontWeight = FontWeights.Bold
+                };
+                saveBtn.Click += (s, e) => { StopEditingChild(); };
+                _paramsStackPanel.Children.Insert(0, saveBtn); // В самый верх
             }
 
             // Заливка
@@ -1782,18 +1872,43 @@ namespace ShapeEditor
         private void ShapeCanvas_Move(object sender, MouseEventArgs e)
         {
             if (!potentialDrag || draggedShapeCanvas == null) return;
+
             Point pos = e.GetPosition(DrawCanvas);
-            double newLeft = startLeft + (pos.X - startMouse.X);
-            double newTop = startTop + (pos.Y - startMouse.Y);
-            Canvas.SetLeft(draggedShapeCanvas, newLeft);
-            Canvas.SetTop(draggedShapeCanvas, newTop);
-            if (_boundingBoxVisual != null && draggedShapeCanvas == _selectedShapeVisual)
+            double deltaX = pos.X - startMouse.X;
+            double deltaY = pos.Y - startMouse.Y;
+
+            if (_editingParentCompound != null && _currentShape != _editingParentCompound)
             {
-                Canvas.SetLeft(_boundingBoxVisual, newLeft);
-                Canvas.SetTop(_boundingBoxVisual, newTop);
+                // МЫ РЕДАКТИРУЕМ РЕБЕНКА ВНУТРИ ГРУППЫ
+                // Двигаем его якорь относительно группы
+                double localDeltaX = deltaX / _editingParentCompound.Scale;
+                double localDeltaY = deltaY / _editingParentCompound.Scale;
+
+                // Здесь нужна логика обратного поворота, если группа повернута
+                // Но для простоты пока сдвинем якорь:
+                var p = _currentShape.AnchorPoint;
+                p.X = Math.Round(originalAnchorPos.X + localDeltaX);
+                p.Y = Math.Round(originalAnchorPos.Y + localDeltaY);
+                _currentShape.AnchorPoint = p;
+
+                RedrawPreservingAnchor();
+            }
+            else
+            {
+                // Двигаем обычную фигуру или всю группу целиком
+                double newLeft = startLeft + deltaX;
+                double newTop = startTop + deltaY;
+
+                Canvas.SetLeft(draggedShapeCanvas, newLeft);
+                Canvas.SetTop(draggedShapeCanvas, newTop);
+
+                if (_boundingBoxVisual != null)
+                {
+                    Canvas.SetLeft(_boundingBoxVisual, newLeft);
+                    Canvas.SetTop(_boundingBoxVisual, newTop);
+                }
             }
 
-            // ДОБАВЛЕНО: Обновление панели параметров при перетаскивании
             if (_paramsPanelIsOpen) RefreshParamsPanelValues();
         }
 
@@ -2289,6 +2404,89 @@ namespace ShapeEditor
         //}
 
 
+        private void AddChildToCompound(CompoundShape parent, string type)
+        {
+            ShapeBase newShape = type switch
+            {
+                "Прямоугольник" => new RectangleShape(),
+                "Треугольник" => new TriangleShape(),
+                "Трапеция" => new TrapezoidShape(),
+                "Круг" => new CircleShape(),
+                "Шестиугольник" => new HexagonShape(),
+                _ => new RectangleShape()
+            };
+
+            // Настройка базовых свойств
+            newShape.Fill = Brushes.Transparent;
+            for (int i = 0; i < newShape.SidesCount; i++)
+            {
+                newShape.SideColors.Add(Brushes.Black);
+                newShape.SideThickness.Add(2.0);
+            }
+
+            parent.AddChildShape(newShape);
+            RedrawPreservingAnchor();
+            RebuildParamsPanel();
+        }
+
+        private void StartEditingChild(CompoundShape parent, ShapeBase child)
+        {
+            _editingParentCompound = parent;
+
+            // Временно делаем "ребёнка" текущей фигурой для всех механизмов редактирования
+            _currentShape = child;
+
+            // Нам нужно найти визуальный объект (Canvas) именно этого ребёнка.
+            // В CompoundShape.Build() мы помечали детей через Tag.
+            foreach (var element in _currentShapeVisual.Children)
+            {
+                if (element is Canvas childCanvas && ReferenceEquals(childCanvas.Tag, child))
+                {
+                    _selectedShapeVisual = childCanvas;
+                    break;
+                }
+            }
+
+            RebuildParamsPanel();
+            ShowBoundingBox(_selectedShapeVisual);
+        }
+
+        private void StopEditingChild()
+        {
+            if (_editingParentCompound == null) return;
+
+            var parent = _editingParentCompound;
+            _editingParentCompound = null;
+            _currentShape = parent;
+
+            // Ищем визуал родителя в общем списке
+            int idx = _allShapes.IndexOf(parent);
+            if (idx >= 0)
+            {
+                _currentShapeVisual = _allShapeVisuals[idx];
+                _selectedShapeVisual = _currentShapeVisual;
+            }
+
+            ClearBoundingBox();
+            RedrawPreservingAnchor(); // Это перестроит все дерево
+            RebuildParamsPanel();
+        }
+
+        private void HighlightChildInCompound(CompoundShape parent, int childIndex)
+        {
+            if (childIndex < 0 || childIndex >= parent.ChildShapes.Count) return;
+            var child = parent.ChildShapes[childIndex];
+
+            // Ищем Canvas ребенка внутри визуального дерева родителя
+            foreach (var element in _currentShapeVisual.Children)
+            {
+                if (element is Canvas childCanvas && ReferenceEquals(childCanvas.Tag, child))
+                {
+                    ShowBoundingBox(childCanvas); // Показываем рамку только для этой части
+                    return;
+                }
+            }
+        }
 
     }
 }
