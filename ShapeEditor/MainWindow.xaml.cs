@@ -631,14 +631,15 @@ namespace ShapeEditor
                 _paramsStackPanel.Children.Add(new TextBlock
                 {
                     Text = "Углы между отрезками:",
-                        FontWeight = FontWeights.Bold,
+                    FontWeight = FontWeights.Bold,
                     Margin = new Thickness(0, 12, 0, 6)
                 });
 
                 for (int i = 0; i < customShape.Segments.Count; i++)
                 {
-                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
+                    int currentSegmentIndex = i;  // защита от замыкания
 
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
                     row.Children.Add(new TextBlock
                     {
                         Text = $"Угол {i + 1} → {((i + 1) % customShape.Segments.Count) + 1}:",
@@ -653,16 +654,36 @@ namespace ShapeEditor
                         Tag = i
                     };
 
+                    // Подсветка при фокусе
+                    angleTb.GotFocus += (s, ev) =>
+                    {
+                        int seg1 = currentSegmentIndex;
+                        int seg2 = (currentSegmentIndex + 1) % customShape.Segments.Count;
+                        UpdateCustomSegmentHighlight(seg1, seg2);
+                    };
+
+                    // Очистка подсветки при потере фокуса
                     angleTb.LostFocus += (s, ev) =>
                     {
-                        if (s is TextBox tb && int.TryParse(tb.Tag?.ToString(), out int idx) && double.TryParse(tb.Text, out double ang))
+                        UpdateCustomSegmentHighlight();  // очистка
+                        ApplyAngleChange(currentSegmentIndex, angleTb.Text);  // ← применение значения
+                    };
+
+                    // Применение по Enter
+                    angleTb.KeyDown += (s, ev) =>
+                    {
+                        if (ev.Key == Key.Enter)
                         {
-                            customShape.SetEdgeAngle(idx, ang);
-                            RedrawPreservingAnchor();
+                            ApplyAngleChange(currentSegmentIndex, angleTb.Text);
+                            ev.Handled = true;
                         }
                     };
 
-                    angleTb.GotFocus += (s, ev) => UpdateCustomSegmentHighlight(i, (i + 1) % customShape.Segments.Count);
+                    // Опционально: проверка ввода в реальном времени (можно убрать, если не нужно)
+                    angleTb.TextChanged += (s, ev) =>
+                    {
+                        // Можно добавить валидацию, но пока просто оставим
+                    };
 
                     var lockCb = new CheckBox
                     {
@@ -672,11 +693,13 @@ namespace ShapeEditor
                         IsChecked = customShape.Segments[i].AngleLocked,
                         Tag = i
                     };
+
                     lockCb.Checked += (s, ev) =>
                     {
                         if (s is CheckBox cb && int.TryParse(cb.Tag?.ToString(), out int idx) && idx < customShape.Segments.Count)
                             customShape.Segments[idx].AngleLocked = true;
                     };
+
                     lockCb.Unchecked += (s, ev) =>
                     {
                         if (s is CheckBox cb && int.TryParse(cb.Tag?.ToString(), out int idx) && idx < customShape.Segments.Count)
@@ -2128,5 +2151,144 @@ namespace ShapeEditor
             }
             // Если ничего не нашли — ничего не делаем (можно добавить лог/отладку)
         }
+
+        private void ApplyAngleChange(int segmentIndex, string inputText)
+        {
+            if (_currentShape is not CustomShape customShape) return;
+            if (segmentIndex < 0 || segmentIndex >= customShape.Segments.Count) return;
+
+            if (double.TryParse(inputText, out double newAngle))
+            {
+                // Учитываем блокировку угла
+                if (customShape.Segments[segmentIndex].AngleLocked)
+                {
+                    // Если заблокировано — возвращаем старое значение в поле
+                    RefreshAngleTextBox(segmentIndex);
+                    return;
+                }
+
+                customShape.SetEdgeAngle(segmentIndex, newAngle);
+                RedrawPreservingAnchor();
+
+                // Обновляем отображение (на случай округления или других эффектов)
+                RefreshAngleTextBox(segmentIndex);
+            }
+            else
+            {
+                // Некорректный ввод — возвращаем старое значение
+                RefreshAngleTextBox(segmentIndex);
+            }
+        }
+
+        private void RefreshAngleTextBox(int segmentIndex)
+        {
+            if (_paramsStackPanel == null) return;
+
+            // Ищем TextBox для данного сегмента
+            foreach (var child in _paramsStackPanel.Children.OfType<StackPanel>())
+            {
+                if (child.Children.Count >= 2 && child.Children[1] is TextBox tb && tb.Tag is int idx && idx == segmentIndex)
+                {
+                    double currentAngle = ((CustomShape)_currentShape).GetEdgeAngle(segmentIndex);
+                    tb.Text = currentAngle.ToString("0.0");
+                    break;
+                }
+            }
+        }
+
+        //private void HighlightVertex(int vertexIndex, bool highlight = true)
+        //{
+        //    if (_currentShapeVisual == null) return;
+
+        //    // Удаляем старую подсветку вершины, если была
+        //    if (_segmentHighlightContainer != null && _currentShapeVisual.Children.Contains(_segmentHighlightContainer))
+        //    {
+        //        _currentShapeVisual.Children.Remove(_segmentHighlightContainer);
+        //        _segmentHighlightContainer = null;
+        //    }
+
+        //    if (!highlight) return;
+
+        //    var container = new Canvas { IsHitTestVisible = false };
+        //    bool found = false;
+
+        //    // Ищем точку-якорь или создаём визуальную метку на вершине
+        //    Point localVertex = _currentShape.Vertices[vertexIndex];
+
+        //    // Преобразуем в координаты canvas (учитываем масштаб, поворот, смещение minX/minY)
+        //    double angleRad = _currentShape.Angle * Math.PI / 180.0;
+        //    double cos = Math.Cos(angleRad);
+        //    double sin = Math.Sin(angleRad);
+
+        //    double dx = localVertex.X - _currentShape.AnchorPoint.X;
+        //    double dy = localVertex.Y - _currentShape.AnchorPoint.Y;
+
+        //    double rx = _currentShape.AnchorPoint.X + dx * cos - dy * sin;
+        //    double ry = _currentShape.AnchorPoint.Y + dx * sin + dy * cos;
+
+        //    double scaledX = rx * _currentShape.Scale;
+        //    double scaledY = ry * _currentShape.Scale;
+
+        //    double canvasX = scaledX - _currentShape.MinX;
+        //    double canvasY = scaledY - _currentShape.MinY;
+
+        //    // Создаём большую заметную метку на вершине
+        //    var highlightCircle = new Ellipse
+        //    {
+        //        Width = 24,
+        //        Height = 24,
+        //        Stroke = Brushes.Red,
+        //        StrokeThickness = 3,
+        //        Fill = Brushes.Yellow,
+        //        Opacity = 0.9,
+        //        IsHitTestVisible = false
+        //    };
+
+        //    Canvas.SetLeft(highlightCircle, canvasX - 12);
+        //    Canvas.SetTop(highlightCircle, canvasY - 12);
+
+        //    container.Children.Add(highlightCircle);
+        //    found = true;
+
+        //    // Опционально: подсвечиваем два прилегающих сегмента (для контекста)
+        //    // Предыдущий сегмент → vertexIndex-1 → vertexIndex
+        //    // Следующий сегмент   → vertexIndex   → vertexIndex+1
+
+        //    int prevSeg = (vertexIndex - 1 + _currentShape.SidesCount) % _currentShape.SidesCount;
+        //    int nextSeg = vertexIndex % _currentShape.SidesCount;
+
+        //    foreach (var child in _currentShapeVisual.Children.OfType<Shape>())
+        //    {
+        //        if (child.Tag is int tag && (tag == prevSeg || tag == nextSeg))
+        //        {
+        //            Shape segOverlay;
+
+        //            if (child is Polygon poly)
+        //            {
+        //                segOverlay = new Polygon
+        //                {
+        //                    Points = new PointCollection(poly.Points),
+        //                    Stroke = Brushes.OrangeRed,
+        //                    StrokeThickness = 5,
+        //                    Fill = Brushes.Transparent,
+        //                    Opacity = 0.6,
+        //                    IsHitTestVisible = false
+        //                };
+        //            }
+        //            else continue;
+
+        //            container.Children.Add(segOverlay);
+        //        }
+        //    }
+
+        //    if (found)
+        //    {
+        //        _segmentHighlightContainer = container;
+        //        _currentShapeVisual.Children.Add(container);
+        //    }
+        //}
+
+
+
     }
 }
