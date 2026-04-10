@@ -114,23 +114,11 @@
                                 BorderBrush="{DynamicResource PrimaryHueMidBrush}"
                                 Foreground="{DynamicResource PrimaryHueMidBrush}"
                                 Margin="0,6"
-                                Background="LightBlue"
+                                Background="Lavender"
                                 Height="42"
                                 Click="AddCustomShape">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                 <TextBlock Text="Кастомная фигура" VerticalAlignment="Center" FontSize="16"/>
-                            </StackPanel>
-                        </Button>
-
-                        <Button Style="{StaticResource MaterialDesignOutlinedButton}"
-                                BorderBrush="{DynamicResource PrimaryHueMidBrush}"
-                                Foreground="{DynamicResource PrimaryHueMidBrush}"
-                                Margin="0,6"
-                                Background="LightGreen"
-                                Height="42"
-                                Click="AddCompoundShape">
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                <TextBlock Text="Комплексная фигура" VerticalAlignment="Center" FontSize="16"/>
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -160,17 +148,48 @@
         </Border>
 
         <!-- Холст для рисования -->
+        <!-- Холст для рисования -->
         <Canvas x:Name="DrawCanvas" 
-                Grid.Column="1" 
-                Background="White"
-                ClipToBounds="True">
+        Grid.Column="1" 
+        Background="White"
+        ClipToBounds="True"
+        ContextMenuOpening="DrawCanvas_ContextMenuOpening">
+            <!-- Добавили событие открытия меню -->
             <Canvas.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="Прямоугольник" Click="AddRectangle" />
-                    <MenuItem Header="Треугольник" Click="AddTriangle" />
-                    <MenuItem Header="Трапеция" Click="AddTrapezoid" />
-                    <MenuItem Header="Окружность" Click="AddCircle" />
-                    <MenuItem Header="Шестиугольник" Click="AddHexagon" />
+                <ContextMenu x:Name="MainContextMenu">
+                    <!-- Сгруппировать -->
+                    <MenuItem x:Name="GroupMenu" Header="Сгруппировать" Click="GroupMenuItem_Click">
+                        <MenuItem.Icon>
+                            <materialDesign:PackIcon Kind="Group" />
+                            <!-- Заменили VectorCombine на Group -->
+                        </MenuItem.Icon>
+                    </MenuItem>
+
+                    <!-- Разгруппировать -->
+                    <MenuItem x:Name="UngroupMenu" Header="Разгруппировать" Click="UngroupMenuItem_Click">
+                        <MenuItem.Icon>
+                            <materialDesign:PackIcon Kind="Ungroup" />
+                            <!-- Заменили VectorDecombine на Ungroup -->
+                        </MenuItem.Icon>
+                    </MenuItem>
+
+                    <Separator />
+
+                    <!-- Добавить фигуру -->
+                    <MenuItem Header="Добавить фигуру">
+                        <MenuItem Header="Прямоугольник" Click="AddRectangle" />
+                        <MenuItem Header="Треугольник" Click="AddTriangle" />
+                        <MenuItem Header="Трапеция" Click="AddTrapezoid" />
+                        <MenuItem Header="Окружность" Click="AddCircle" />
+                        <MenuItem Header="Шестиугольник" Click="AddHexagon" />
+                    </MenuItem>
+
+                    <Separator />
+
+                    <!-- Удалить -->
+                    <MenuItem Header="Удалить выбранное" Click="DeleteMenuItem_Click" Foreground="Red">
+                        <materialDesign:PackIcon Kind="Delete" Foreground="Red" />
+                    </MenuItem>
                 </ContextMenu>
             </Canvas.ContextMenu>
         </Canvas>

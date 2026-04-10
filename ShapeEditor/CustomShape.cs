@@ -20,7 +20,7 @@ namespace ShapeEditor
             SidesCount = 0;
             Vertices = new Point[0];
         }
-
+        public override string DisplayNameRu => "Произвольная";
         protected override Point[] GetDefaultVertices() => new Point[0];
         public bool IsClosed { get; set; } = false;
 

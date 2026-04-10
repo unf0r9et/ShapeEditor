@@ -11,7 +11,7 @@ namespace ShapeEditor
         {
             SidesCount = 20;
         }
-
+        public override string DisplayNameRu => "Круг";
         protected override Point[] GetDefaultVertices() => new Point[0];
 
         public override bool IsPointInside(Point localPoint)

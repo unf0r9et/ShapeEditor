@@ -8,7 +8,7 @@ namespace ShapeEditor
         {
             SidesCount = 6;
         }
-
+        public override string DisplayNameRu => "Шестиугольник";
         public override string[] SideNames => new[]
         {
             "Верхняя правая", "Правая", "Нижняя правая",

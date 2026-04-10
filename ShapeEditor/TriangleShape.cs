@@ -10,6 +10,10 @@ namespace ShapeEditor
             SidesCount = 3;
         }
 
+        // TriangleShape.cs
+        public override string DisplayNameRu => "Треугольник";
+
+
         public override string[] SideNames => new[] { "Правая", "Нижняя", "Левая" };
 
         protected override Point[] GetDefaultVertices()
@@ -50,14 +54,6 @@ namespace ShapeEditor
             return true;
         }
 
-        /// <summary>
-        /// Попытаться установить длины всех рёбер треугольника одновременно: [right, bottom, left]
-        /// Поведение:
-        /// - Если ребро заблокировано, считаем его ENDPOINTS фиксированными (их позиции не меняются).
-        /// - Если заблокировано одно ребро, строим треугольник, разместив третью вершину как пересечение окружностей.
-        /// - Если не заблоклено ни одного — строим треугольник с основанием (V1-V2) горизонтально, центрируя основание
-        ///   по текущему положению и используя аналитическую формулу (как раньше).
-        /// </summary>
         public override bool TrySetEdgeLengths(double[] lengths)
         {
             if (lengths == null || lengths.Length != 3) return false;

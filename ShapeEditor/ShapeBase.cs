@@ -33,6 +33,14 @@ namespace ShapeEditor
 
         public List<bool> EdgeLengthLocked { get; set; } = new();
 
+        // 🔹 Отображаемое имя на русском (переопределяется в наследниках)
+        public virtual string DisplayNameRu => "Фигура";
+
+        private static int _globalIdCounter = 0;
+
+        // 🔹 Уникальный числовой ID (присваивается при создании)
+        public int Id { get; }
+
         protected abstract Point[] GetDefaultVertices();
 
         public virtual string[] SideNames
@@ -52,6 +60,7 @@ namespace ShapeEditor
             // initialize locks for each edge
             EdgeLengthLocked = new List<bool>(Vertices.Length);
             for (int i = 0; i < Vertices.Length; i++) EdgeLengthLocked.Add(false);
+                    Id = ++_globalIdCounter; 
         }
 
         /// <summary>

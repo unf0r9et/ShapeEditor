@@ -18,7 +18,12 @@ namespace ShapeEditor
         private Canvas draggedShapeCanvas;
         private double startLeft;
         private double startTop;
-
+        // Для редактирования ребёнка "на месте"
+        private bool _isEditingChildInPlace = false;
+        private Canvas _originalParentVisual = null;    // визуал родителя
+        private Canvas _childNestedVisual = null;        // вложенный визуал ребёнка
+        private double _childWorldX, _childWorldY;       // мировая позиция якоря ребёнка
+        private Point _childOriginalAnchor;              // оригинальный AnchorPoint ребёнка
         // Перетаскивание якоря
         private bool draggingAnchor;
         private Point dragStartWorld;
@@ -95,6 +100,12 @@ namespace ShapeEditor
         // Поля для работы с комплексными фигурами
         private CompoundShape _editingParentCompound = null; // Родитель, если мы внутри группы
         private ShapeBase _childShapeBeforeEdit = null;      // Копия или ссылка для отмены (опционально)
+
+        private List<Canvas> _selectedVisuals = new();
+
+
+
+
         public MainWindow()
         {
             InitializeComponent();
@@ -305,19 +316,29 @@ namespace ShapeEditor
         {
             var canvas = shape.Build(anchorWorldX, anchorWorldY);
             canvas.Tag = shape;
-
             canvas.MouseLeftButtonDown += ShapeCanvas_Down;
             canvas.MouseMove += ShapeCanvas_Move;
             canvas.MouseLeftButtonUp += ShapeCanvas_Up;
 
+            // === РАЗНЫЕ ОБРАБОТЧИКИ ДЛЯ ЯКОРЯ ===
             foreach (UIElement child in canvas.Children)
             {
-                if (child is Ellipse ellipse && ellipse.Tag is string tag && tag == "Anchor")
+                if (child is Ellipse ellipse && ellipse.Tag?.ToString() == "Anchor")
                 {
-                    ellipse.MouseLeftButtonDown += VertexAnchor_Down;
-                    ellipse.MouseMove += VertexAnchor_Move;
-                    ellipse.MouseLeftButtonUp += VertexAnchor_Up;
                     ellipse.Cursor = Cursors.SizeAll;
+
+                    if (shape is CompoundShape)
+                    {
+                        ellipse.MouseLeftButtonDown += CompoundAnchor_Down;
+                        ellipse.MouseMove += CompoundAnchor_Move;
+                        ellipse.MouseLeftButtonUp += CompoundAnchor_Up;
+                    }
+                    else
+                    {
+                        ellipse.MouseLeftButtonDown += VertexAnchor_Down;
+                        ellipse.MouseMove += VertexAnchor_Move;
+                        ellipse.MouseLeftButtonUp += VertexAnchor_Up;
+                    }
                 }
             }
 
@@ -328,6 +349,55 @@ namespace ShapeEditor
         {
             if (_currentShape == null || _currentShapeVisual == null)
                 return;
+
+            // 🔐 Если редактируем ребёнка "на месте" — обновляем содержимое без замены канваса
+            if (_isEditingChildInPlace && _childNestedVisual != null)
+            {
+                // 1. Запоминаем текущую мировую позицию и состояние (уникальные имена!)
+                double childCurrentLeft = Canvas.GetLeft(_childNestedVisual);
+                double childCurrentTop = Canvas.GetTop(_childNestedVisual);
+                bool childWasSelected = (_selectedShapeVisual == _childNestedVisual);
+
+                // 2. Удаляем старый визуал с холста
+                if (DrawCanvas.Children.Contains(_childNestedVisual))
+                    DrawCanvas.Children.Remove(_childNestedVisual);
+
+                // 3. Создаём НОВЫЙ визуал через Build
+                var newChildVisual = _currentShape.Build(_childWorldX, _childWorldY);
+                newChildVisual.Tag = _currentShape;
+                newChildVisual.MouseLeftButtonDown += ShapeCanvas_Down;
+                newChildVisual.MouseMove += ShapeCanvas_Move;
+                newChildVisual.MouseLeftButtonUp += ShapeCanvas_Up;
+
+                // 4. Восстанавливаем обработчики якоря
+                foreach (UIElement child in newChildVisual.Children)
+                {
+                    if (child is Ellipse ellipse && ellipse.Tag?.ToString() == "Anchor")
+                    {
+                        ellipse.Cursor = Cursors.SizeAll;
+                        ellipse.MouseLeftButtonDown += VertexAnchor_Down;
+                        ellipse.MouseMove += VertexAnchor_Move;
+                        ellipse.MouseLeftButtonUp += VertexAnchor_Up;
+                    }
+                }
+
+                // 5. Позиционируем новый визуал на том же месте
+                Canvas.SetLeft(newChildVisual, childCurrentLeft);
+                Canvas.SetTop(newChildVisual, childCurrentTop);
+                DrawCanvas.Children.Add(newChildVisual);
+
+                // 6. Обновляем ссылки (используем новые имена!)
+                _childNestedVisual = newChildVisual;
+                _currentShapeVisual = newChildVisual;
+                if (childWasSelected) _selectedShapeVisual = newChildVisual;
+
+                // 7. Обновляем UI
+                ShowBoundingBox(newChildVisual);
+                if (_paramsPanelIsOpen) RefreshParamsPanelValues();
+                return;
+            }
+
+
 
             Point worldAnchor = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
             bool wasSelected = (_selectedShapeVisual == _currentShapeVisual);
@@ -412,41 +482,42 @@ namespace ShapeEditor
             if (_currentShape == null || _currentShapeVisual == null || _paramsStackPanel == null)
                 return;
 
-            // Проходим по всем дочерним элементам панели параметров
+            // Защита: если у фигуры нет вершин (CompoundShape, Circle) — выходим
+            if (_currentShape.Vertices == null || _currentShape.Vertices.Length == 0)
+                return;
+
             foreach (var child in _paramsStackPanel.Children)
             {
-                if (child is Grid row)
-                {
-                    // Ищем строки с координатами вершин (они содержат 3 колонки)
-                    if (row.ColumnDefinitions.Count == 3)
-                    {
-                        // Ищем локальные координаты (колонка 1)
-                        if (row.Children.Count > 1 && row.Children[1] is StackPanel localPanel)
-                        {
-                            // Ищем TextBox'ы с координатами
-                            var textBoxes = localPanel.Children.OfType<TextBox>().ToList();
-                            if (textBoxes.Count >= 2)
-                            {
-                                // Получаем индекс вершины из Tag первого TextBox
-                                if (textBoxes[0].Tag is int vertexIndex)
-                                {
-                                    // Обновляем локальные координаты
-                                    textBoxes[0].Text = (_currentShape.Vertices[vertexIndex].X - _currentShape.AnchorPoint.X).ToString("0");
-                                    textBoxes[1].Text = (_currentShape.Vertices[vertexIndex].Y - _currentShape.AnchorPoint.Y).ToString("0");
-                                }
-                            }
-                        }
+                if (child is not Grid row || row.ColumnDefinitions.Count != 3)
+                    continue;
 
-                        // Ищем глобальные координаты (колонка 2)
-                        if (row.Children.Count > 2 && row.Children[2] is StackPanel worldPanel)
+                // --- ЛОКАЛЬНЫЕ координаты (колонка 1) ---
+                if (row.Children.Count > 1 && row.Children[1] is StackPanel localPanel)
+                {
+                    var textBoxes = localPanel.Children.OfType<TextBox>().ToList();
+                    if (textBoxes.Count >= 2 && textBoxes[0].Tag is int vertexIndex)
+                    {
+                        // 🔐 ЗАЩИТА: проверяем, что индекс в пределах массива
+                        if (vertexIndex >= 0 && vertexIndex < _currentShape.Vertices.Length)
                         {
-                            var worldTextBoxes = worldPanel.Children.OfType<TextBox>().ToList();
-                            if (worldTextBoxes.Count >= 2 && worldTextBoxes[0].Tag is int vertexIndex)
-                            {
-                                Point worldPos = GetVertexWorldPosition(_currentShape, _currentShapeVisual, vertexIndex);
-                                worldTextBoxes[0].Text = worldPos.X.ToString("0");
-                                worldTextBoxes[1].Text = worldPos.Y.ToString("0");
-                            }
+                            textBoxes[0].Text = (_currentShape.Vertices[vertexIndex].X - _currentShape.AnchorPoint.X).ToString("0");
+                            textBoxes[1].Text = (_currentShape.Vertices[vertexIndex].Y - _currentShape.AnchorPoint.Y).ToString("0");
+                        }
+                    }
+                }
+
+                // --- ГЛОБАЛЬНЫЕ координаты (колонка 2) ---
+                if (row.Children.Count > 2 && row.Children[2] is StackPanel worldPanel)
+                {
+                    var worldTextBoxes = worldPanel.Children.OfType<TextBox>().ToList();
+                    if (worldTextBoxes.Count >= 2 && worldTextBoxes[0].Tag is int vertexIndex)
+                    {
+                        // 🔐 ЗАЩИТА: проверяем индекс
+                        if (vertexIndex >= 0 && vertexIndex < _currentShape.Vertices.Length)
+                        {
+                            Point worldPos = GetVertexWorldPosition(_currentShape, _currentShapeVisual, vertexIndex);
+                            worldTextBoxes[0].Text = worldPos.X.ToString("0");
+                            worldTextBoxes[1].Text = worldPos.Y.ToString("0");
                         }
                     }
                 }
@@ -540,6 +611,8 @@ namespace ShapeEditor
             _edgeLengthBoxes.Clear();
             _edgeLockBoxes.Clear();
             _pendingEdgeLengths.Clear();
+            _vertexWorldXBoxes.Clear(); // ← важно!
+            _vertexWorldYBoxes.Clear(); // ← важно!
 
             bool isCircle = _currentShape is CircleShape;
             int sides = _currentShape.SidesCount;
@@ -773,50 +846,101 @@ namespace ShapeEditor
                     Margin = new Thickness(0, 10, 0, 5)
                 });
 
-                // Кнопки добавления новых фигур в группу
-                var addButtonsRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
-                string[] types = { "Прямоугольник", "Треугольник", "Трапеция", "Круг", "Шестиугольник" };
-                foreach (var type in types)
+                var ungroupBtn = new Button
                 {
-                    var btn = new Button { Content = "+" + type, Margin = new Thickness(2), Padding = new Thickness(4, 2, 4, 2) };
-                    btn.Click += (s, e) => { AddChildToCompound(compound, type); };
-                    addButtonsRow.Children.Add(btn);
-                }
-                _paramsStackPanel.Children.Add(addButtonsRow);
+                    Content = "РАЗГРУППИРОВАТЬ",
+                    Background = Brushes.LightSalmon,
+                    Margin = new Thickness(0, 0, 0, 10),
+                    Height = 30
+                };
+                ungroupBtn.Click += (s, e) => UngroupSelected();
+                _paramsStackPanel.Children.Add(ungroupBtn);
+
+                _paramsStackPanel.Children.Add(new TextBlock { Text = "Фигуры в группе:", FontWeight = FontWeights.Bold });
 
                 // Список существующих фигур в группе
                 var listContainer = new StackPanel();
                 for (int i = 0; i < compound.ChildShapes.Count; i++)
                 {
                     var child = compound.ChildShapes[i];
-                    int index = i;
+                    int index = i;  // ← это и есть уникальный номер в группе (1, 2, 3...)
 
                     var row = new Grid { Margin = new Thickness(0, 2, 0, 2) };
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-                    // Внутри цикла создания списка фигур:
+                    // 🔹 Кнопка с номером и русским именем
+                    // Внутри RebuildParamsPanel, блок if (_currentShape is CompoundShape compound)
+
                     var nameBtn = new Button
                     {
-                        Content = $"{index + 1}. {child.GetType().Name.Replace("Shape", "")}",
+                        Content = $"ID={child.Id}. {child.DisplayNameRu}",  // ← Глобальный ID + имя
                         HorizontalContentAlignment = HorizontalAlignment.Left,
                         Background = Brushes.White,
-                        Foreground = Brushes.Black, // Явный цвет текста
+                        Foreground = Brushes.Black,
                         BorderBrush = Brushes.LightGray,
                         BorderThickness = new Thickness(1),
-                        Padding = new Thickness(5, 2, 5, 2)
+                        Padding = new Thickness(5, 2, 5, 2),
+                        FontSize = 12,
+                        Cursor = Cursors.Hand,
+                        ToolTip = $"Тип: {child.GetType().Name}\nГлобальный ID: {child.Id}"
                     };
 
-                    // Подсветка при клике на имя в списке
                     nameBtn.Click += (s, e) => { HighlightChildInCompound(compound, index); };
 
-                    var editBtn = new Button { Content = "✎", Margin = new Thickness(5, 0, 0, 0), Width = 25 };
+                    // Кнопка редактирования
+                    var editBtn = new Button
+                    {
+                        Content = "✎",
+                        Margin = new Thickness(5, 0, 0, 0),
+                        Width = 30,
+                        Height = 25,
+                        Padding = new Thickness(0),
+                        FontSize = 14,
+                        Cursor = Cursors.Hand
+                    };
                     editBtn.Click += (s, e) => { StartEditingChild(compound, child); };
 
-                    var delBtn = new Button { Content = "X", Margin = new Thickness(5, 0, 0, 0), Width = 25, Foreground = Brushes.Red };
+                    // Кнопка извлечения (не удаления!)
+                    var delBtn = new Button
+                    {
+                        Content = "✕",
+                        Margin = new Thickness(5, 0, 0, 0),
+                        Width = 30,
+                        Height = 25,
+                        Padding = new Thickness(0),
+                        FontSize = 14,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = Brushes.Crimson,
+                        Cursor = Cursors.Hand,
+                        ToolTip = "Извлечь из группы"
+                    };
                     delBtn.Click += (s, e) => {
+                        // === Извлечение фигуры из группы (код из предыдущего ответа) ===
+                        Point parentWorld = compound.GetAnchorWorldPosition(_currentShapeVisual);
+                        double rad = compound.Angle * Math.PI / 180.0;
+                        double cos = Math.Cos(rad), sin = Math.Sin(rad);
+
+                        double lx = child.AnchorPoint.X * compound.Scale;
+                        double ly = child.AnchorPoint.Y * compound.Scale;
+                        double rx = lx * cos - ly * sin;
+                        double ry = lx * sin + ly * cos;
+
+                        double worldX = parentWorld.X + rx;
+                        double worldY = parentWorld.Y + ry;
+
+                        child.AnchorPoint = new Point(0, 0);
+                        child.Scale *= compound.Scale;
+                        child.Angle += compound.Angle;
+
                         compound.RemoveChildShape(child);
+
+                        var childVisual = CreateShapeVisual(child, worldX, worldY);
+                        DrawCanvas.Children.Add(childVisual);
+                        _allShapes.Add(child);
+                        _allShapeVisuals.Add(childVisual);
+
                         RedrawPreservingAnchor();
                         RebuildParamsPanel();
                     };
@@ -886,11 +1010,14 @@ namespace ShapeEditor
             // Длины рёбер (граней)
             if (!isCircle && sides > 0)
             {
+
                 _paramsStackPanel.Children.Add(new TextBlock
                 {
-                    Text = "Длины рёбер:",
+                    Text = $"Глобальный ID: {_currentShape.Id}",
                     FontWeight = FontWeights.Bold,
-                    Margin = new Thickness(0, 14, 0, 6)
+                    Foreground = Brushes.Black,
+                    FontFamily = new FontFamily("Consolas"),
+                    Margin = new Thickness(0, 8, 0, 12)
                 });
 
                 for (int i = 0; i < sides; i++)
@@ -1848,20 +1975,38 @@ namespace ShapeEditor
         {
             if (draggingAnchor) return;
 
-            if (e.ClickCount == 2 && sender is Canvas canvas && canvas.Tag is ShapeBase shape)
+            if (sender is Canvas clickedCanvas)
             {
-                _currentShape = shape;
-                _currentShapeVisual = canvas;
-                e.Handled = true;
-                return;
+                // Проверяем, зажат ли Ctrl
+                bool isCtrlPressed = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+
+                if (isCtrlPressed)
+                {
+                    // Множественное выделение
+                    if (_selectedVisuals.Contains(clickedCanvas))
+                    {
+                        _selectedVisuals.Remove(clickedCanvas);
+                        // Если это была последняя выделенная фигура, снимаем рамку
+                        if (_selectedShapeVisual == clickedCanvas) ClearSelection();
+                    }
+                    else
+                    {
+                        _selectedVisuals.Add(clickedCanvas);
+                        SelectShape(clickedCanvas); // Показываем рамку на последней выбранной
+                    }
+                }
+                else
+                {
+                    // Обычное выделение (сброс предыдущих)
+                    _selectedVisuals.Clear();
+                    _selectedVisuals.Add(clickedCanvas);
+                    SelectShape(clickedCanvas);
+                }
             }
 
-            if (sender is Canvas clickedCanvas)
-                SelectShape(clickedCanvas);
-
+            // Логика начала перетаскивания (оставляем вашу без изменений)
             draggedShapeCanvas = sender as Canvas;
             if (draggedShapeCanvas == null) return;
-
             potentialDrag = true;
             startMouse = e.GetPosition(DrawCanvas);
             startLeft = Canvas.GetLeft(draggedShapeCanvas);
@@ -1871,33 +2016,34 @@ namespace ShapeEditor
 
         private void ShapeCanvas_Move(object sender, MouseEventArgs e)
         {
-            if (!potentialDrag || draggedShapeCanvas == null) return;
+            if (!potentialDrag || draggedShapeCanvas == null || _currentShape == null) return;
 
-            Point pos = e.GetPosition(DrawCanvas);
-            double deltaX = pos.X - startMouse.X;
-            double deltaY = pos.Y - startMouse.Y;
+            Point currentMouse = e.GetPosition(DrawCanvas);
+            double mouseDeltaX = currentMouse.X - startMouse.X;
+            double mouseDeltaY = currentMouse.Y - startMouse.Y;
 
             if (_editingParentCompound != null && _currentShape != _editingParentCompound)
             {
-                // МЫ РЕДАКТИРУЕМ РЕБЕНКА ВНУТРИ ГРУППЫ
-                // Двигаем его якорь относительно группы
-                double localDeltaX = deltaX / _editingParentCompound.Scale;
-                double localDeltaY = deltaY / _editingParentCompound.Scale;
+                // Перемещение ребенка внутри группы (с учетом вращения группы)
+                double angleRad = -_editingParentCompound.Angle * Math.PI / 180.0;
+                double cos = Math.Cos(angleRad);
+                double sin = Math.Sin(angleRad);
 
-                // Здесь нужна логика обратного поворота, если группа повернута
-                // Но для простоты пока сдвинем якорь:
-                var p = _currentShape.AnchorPoint;
-                p.X = Math.Round(originalAnchorPos.X + localDeltaX);
-                p.Y = Math.Round(originalAnchorPos.Y + localDeltaY);
-                _currentShape.AnchorPoint = p;
+                double localDX = (mouseDeltaX * cos - mouseDeltaY * sin) / _editingParentCompound.Scale;
+                double localDY = (mouseDeltaX * sin + mouseDeltaY * cos) / _editingParentCompound.Scale;
+
+                _currentShape.AnchorPoint = new Point(
+                    originalAnchorPos.X + localDX,
+                    originalAnchorPos.Y + localDY
+                );
 
                 RedrawPreservingAnchor();
             }
             else
             {
-                // Двигаем обычную фигуру или всю группу целиком
-                double newLeft = startLeft + deltaX;
-                double newTop = startTop + deltaY;
+                // Перемещение обычной фигуры или ВСЕЙ группы
+                double newLeft = startLeft + mouseDeltaX;
+                double newTop = startTop + mouseDeltaY;
 
                 Canvas.SetLeft(draggedShapeCanvas, newLeft);
                 Canvas.SetTop(draggedShapeCanvas, newTop);
@@ -2339,44 +2485,100 @@ namespace ShapeEditor
 
         private void StartEditingChild(CompoundShape parent, ShapeBase child)
         {
-            _editingParentCompound = parent;
+            // === 1. Вычисляем мировую позицию якоря ребёнка ===
+            Point parentWorld = parent.GetAnchorWorldPosition(_currentShapeVisual);
+            double rad = parent.Angle * Math.PI / 180.0;
+            double cos = Math.Cos(rad), sin = Math.Sin(rad);
 
-            // Временно делаем "ребёнка" текущей фигурой для всех механизмов редактирования
-            _currentShape = child;
+            double lx = child.AnchorPoint.X * parent.Scale;
+            double ly = child.AnchorPoint.Y * parent.Scale;
+            double rx = lx * cos - ly * sin;
+            double ry = lx * sin + ly * cos;
 
-            // Нам нужно найти визуальный объект (Canvas) именно этого ребёнка.
-            // В CompoundShape.Build() мы помечали детей через Tag.
-            foreach (var element in _currentShapeVisual.Children)
+            _childWorldX = parentWorld.X + rx;
+            _childWorldY = parentWorld.Y + ry;
+            _childOriginalAnchor = child.AnchorPoint;
+
+            // === 2. Находим вложенный визуал ребёнка ===
+            Canvas childVisual = null;
+            foreach (var element in _currentShapeVisual.Children.OfType<Canvas>())
             {
-                if (element is Canvas childCanvas && ReferenceEquals(childCanvas.Tag, child))
+                if (ReferenceEquals(element.Tag, child))
                 {
-                    _selectedShapeVisual = childCanvas;
+                    childVisual = element;
                     break;
                 }
             }
+            if (childVisual == null) return;
 
+            // === 3. Сохраняем состояние для возврата ===
+            _isEditingChildInPlace = true;
+            _originalParentVisual = _currentShapeVisual;
+            _childNestedVisual = childVisual;
+
+            // === 4. "Изолируем" визуал: переносим его на верхний уровень ===
+            // Но НЕ создаём новый — используем тот же объект!
+            _originalParentVisual.Children.Remove(childVisual);
+            DrawCanvas.Children.Add(childVisual);
+
+            // Позиционируем его в мировых координатах (как обычную фигуру)
+            Canvas.SetLeft(childVisual, _childWorldX + child.MinX * child.Scale);
+            Canvas.SetTop(childVisual, _childWorldY + child.MinY * child.Scale);
+
+            // === 5. Обновляем ссылки для редактирования ===
+            _editingParentCompound = parent;
+            _currentShape = child;
+            _currentShapeVisual = childVisual;
+            _selectedShapeVisual = childVisual;
+
+            // === 6. Обновляем UI ===
+            ShowBoundingBox(childVisual);
             RebuildParamsPanel();
-            ShowBoundingBox(_selectedShapeVisual);
         }
 
         private void StopEditingChild()
         {
-            if (_editingParentCompound == null) return;
+            if (!_isEditingChildInPlace || _editingParentCompound == null) return;
 
             var parent = _editingParentCompound;
+            var child = _currentShape;  // та же модель, что и была
+
+            // === 1. Получаем НОВУЮ мировую позицию после редактирования ===
+            double newWorldX = Canvas.GetLeft(_childNestedVisual) - child.MinX * child.Scale;
+            double newWorldY = Canvas.GetTop(_childNestedVisual) - child.MinY * child.Scale;
+
+            // === 2. Возвращаем визуал обратно в родителя ===
+            DrawCanvas.Children.Remove(_childNestedVisual);
+            _originalParentVisual.Children.Add(_childNestedVisual);
+
+            // === 3. Пересчитываем AnchorPoint ребёнка ОТНОСИТЕЛЬНО родителя ===
+            Point parentWorld = parent.GetAnchorWorldPosition(_originalParentVisual);
+            double rad = parent.Angle * Math.PI / 180.0;
+            double cos = Math.Cos(rad), sin = Math.Sin(rad);
+
+            double dx = newWorldX - parentWorld.X;
+            double dy = newWorldY - parentWorld.Y;
+
+            // Обратный поворот
+            double rx = dx * cos + dy * sin;
+            double ry = -dx * sin + dy * cos;
+
+            // Локальные координаты с учётом масштаба родителя
+            child.AnchorPoint = new Point(
+                Math.Round(rx / parent.Scale, 2),
+                Math.Round(ry / parent.Scale, 2)
+            );
+
+            // === 4. Сбрасываем состояние редактирования ===
+            _isEditingChildInPlace = false;
             _editingParentCompound = null;
             _currentShape = parent;
+            _currentShapeVisual = _originalParentVisual;
+            _selectedShapeVisual = _originalParentVisual;
 
-            // Ищем визуал родителя в общем списке
-            int idx = _allShapes.IndexOf(parent);
-            if (idx >= 0)
-            {
-                _currentShapeVisual = _allShapeVisuals[idx];
-                _selectedShapeVisual = _currentShapeVisual;
-            }
-
+            // === 5. Пересобираем визуал родителя с обновлённым ребёнком ===
             ClearBoundingBox();
-            RedrawPreservingAnchor(); // Это перестроит все дерево
+            RedrawPreservingAnchor();  // Перестроит родителя с новыми координатами ребёнка
             RebuildParamsPanel();
         }
 
@@ -2385,16 +2587,338 @@ namespace ShapeEditor
             if (childIndex < 0 || childIndex >= parent.ChildShapes.Count) return;
             var child = parent.ChildShapes[childIndex];
 
-            // Ищем Canvas ребенка внутри визуального дерева родителя
             foreach (var element in _currentShapeVisual.Children)
             {
                 if (element is Canvas childCanvas && ReferenceEquals(childCanvas.Tag, child))
                 {
-                    ShowBoundingBox(childCanvas); // Показываем рамку только для этой части
+                    // 🔹 Используем метод для вложенных визуалов
+                    ShowBoundingBoxForNestedChild(childCanvas, _currentShapeVisual);
                     return;
                 }
             }
         }
 
+        private void GroupSelected()
+        {
+            if (_selectedVisuals.Count < 2) return;
+
+            var compound = new CompoundShape();
+
+            // === 1. Считаем общие границы ВСЕХ фигур (с учётом вложенных) ===
+            double minX = double.MaxValue, minY = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue;
+
+            foreach (var vis in _selectedVisuals)
+            {
+                var shape = vis.Tag as ShapeBase;
+
+                // 🔹 Если это группа — учитываем границы её детей
+                if (shape is CompoundShape nestedCompound)
+                {
+                    foreach (var child in nestedCompound.ChildShapes)
+                    {
+                        Point childWorld = GetChildWorldPosition(nestedCompound, vis, child);
+                        minX = Math.Min(minX, childWorld.X + child.MinX);
+                        minY = Math.Min(minY, childWorld.Y + child.MinY);
+                        maxX = Math.Max(maxX, childWorld.X + child.MaxX);
+                        maxY = Math.Max(maxY, childWorld.Y + child.MaxY);
+                    }
+                }
+                else
+                {
+                    Point worldPos = shape.GetAnchorWorldPosition(vis);
+                    minX = Math.Min(minX, worldPos.X + shape.MinX);
+                    minY = Math.Min(minY, worldPos.Y + shape.MinY);
+                    maxX = Math.Max(maxX, worldPos.X + shape.MaxX);
+                    maxY = Math.Max(maxY, worldPos.Y + shape.MaxY);
+                }
+            }
+
+            Point groupWorldAnchor = new Point((minX + maxX) / 2, (minY + maxY) / 2);
+
+            // === 2. «Распаковываем» группы и добавляем всех детей в новую группу ===
+            foreach (var vis in _selectedVisuals.ToList())
+            {
+                var shape = vis.Tag as ShapeBase;
+
+                if (shape is CompoundShape nestedCompound)
+                {
+                    // 🔹 Если это группа — добавляем её детей (не саму группу!)
+                    foreach (var child in nestedCompound.ChildShapes.ToList())
+                    {
+                        Point childWorld = GetChildWorldPosition(nestedCompound, vis, child);
+
+                        // Пересчитываем якорь относительно новой группы
+                        child.AnchorPoint = new Point(
+                            childWorld.X - groupWorldAnchor.X,
+                            childWorld.Y - groupWorldAnchor.Y
+                        );
+
+                        compound.AddChildShape(child);
+                    }
+
+                    // Удаляем старую группу
+                    nestedCompound.ChildShapes.Clear();
+                    DrawCanvas.Children.Remove(vis);
+                    _allShapes.Remove(nestedCompound);
+                    _allShapeVisuals.Remove(vis);
+                }
+                else
+                {
+                    // 🔹 Обычная фигура — добавляем как есть
+                    Point childWorldPos = shape.GetAnchorWorldPosition(vis);
+                    shape.AnchorPoint = new Point(
+                        childWorldPos.X - groupWorldAnchor.X,
+                        childWorldPos.Y - groupWorldAnchor.Y
+                    );
+
+                    compound.AddChildShape(shape);
+                    DrawCanvas.Children.Remove(vis);
+                    _allShapes.Remove(shape);
+                    _allShapeVisuals.Remove(vis);
+                }
+            }
+
+            var groupVisual = CreateShapeVisual(compound, groupWorldAnchor.X, groupWorldAnchor.Y);
+            DrawCanvas.Children.Add(groupVisual);
+            _allShapes.Add(compound);
+            _allShapeVisuals.Add(groupVisual);
+
+            _selectedVisuals.Clear();
+            SelectShape(groupVisual);
+        }
+
+        // 🔹 Вспомогательный метод: вычисление мировой позиции ребёнка внутри вложенной группы
+        private Point GetChildWorldPosition(CompoundShape parent, Canvas parentVisual, ShapeBase child)
+        {
+            Point parentWorld = parent.GetAnchorWorldPosition(parentVisual);
+            double rad = parent.Angle * Math.PI / 180.0;
+            double cos = Math.Cos(rad), sin = Math.Sin(rad);
+
+            double lx = child.AnchorPoint.X * parent.Scale;
+            double ly = child.AnchorPoint.Y * parent.Scale;
+            double rx = lx * cos - ly * sin;
+            double ry = lx * sin + ly * cos;
+
+            return new Point(parentWorld.X + rx, parentWorld.Y + ry);
+        }
+
+
+        private void UngroupSelected()
+        {
+            if (!(_currentShape is CompoundShape compound)) return;
+
+            Point groupWorldPos = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+
+            foreach (var child in compound.ChildShapes.ToList())
+            {
+                // Пересчитываем локальное смещение в мировое с учетом поворота и масштаба группы
+                double angleRad = _currentShape.Angle * Math.PI / 180.0;
+                double cos = Math.Cos(angleRad);
+                double sin = Math.Sin(angleRad);
+
+                double lx = child.AnchorPoint.X * _currentShape.Scale;
+                double ly = child.AnchorPoint.Y * _currentShape.Scale;
+
+                double worldX = groupWorldPos.X + (lx * cos - ly * sin);
+                double worldY = groupWorldPos.Y + (lx * sin + ly * cos);
+
+                // Применяем трансформации группы к ребенку
+                child.AnchorPoint = new Point(0, 0); // Сбрасываем для удобства на холсте
+                child.Scale *= _currentShape.Scale;
+                child.Angle += _currentShape.Angle;
+
+                // Возвращаем на холст как независимую фигуру
+                var childVis = CreateShapeVisual(child, worldX, worldY);
+                DrawCanvas.Children.Add(childVis);
+                _allShapes.Add(child);
+                _allShapeVisuals.Add(childVis);
+            }
+
+            // Удаляем саму группу
+            _allShapes.Remove(compound);
+            _allShapeVisuals.Remove(_currentShapeVisual);
+            DrawCanvas.Children.Remove(_currentShapeVisual);
+
+            ClearSelection();
+        }
+
+
+
+        private void DrawCanvas_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+        {
+            // Группировать можно только если выбрано 2 и более объекта
+            GroupMenu.IsEnabled = _selectedVisuals.Count >= 2;
+
+            // Разгруппировать можно, только если выбрана ОДНА фигура и это группа (CompoundShape)
+            UngroupMenu.IsEnabled = _selectedVisuals.Count == 1 && _currentShape is CompoundShape;
+        }
+
+        private void GroupMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            GroupSelected(); // Метод математики группировки, который мы обсуждали
+        }
+
+        private void UngroupMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            UngroupSelected(); // Метод возврата фигур на холст
+        }
+
+        private void DeleteMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            // Удаляем всё, что было выбрано (через Ctrl или просто кликом)
+            var toDelete = _selectedVisuals.ToList();
+            foreach (var vis in toDelete)
+            {
+                var shape = vis.Tag as ShapeBase;
+                DrawCanvas.Children.Remove(vis);
+                _allShapes.Remove(shape);
+                _allShapeVisuals.Remove(vis);
+            }
+            _selectedVisuals.Clear();
+            ClearSelection();
+        }
+
+        public static bool IsEditingThisChild(CompoundShape parent, ShapeBase child)
+        {
+            var main = (MainWindow)Application.Current.MainWindow;
+            return main._editingParentCompound == parent && main._currentShape == child;
+        }
+
+        // ==================== ФИНАЛЬНАЯ ВЕРСИЯ — ТОЛЬКО ТОЧКА ПРИВЯЗКИ ДВИГАЕТСЯ ====================
+
+        private void CompoundAnchor_Down(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is not Ellipse ellipse) return;
+            if (ellipse.Parent is not Canvas canvas || canvas.Tag is not CompoundShape compound) return;
+
+            _currentShape = compound;
+            _currentShapeVisual = canvas;
+            anchorDragCanvas = canvas;
+
+            dragStartWorld = e.GetPosition(DrawCanvas);
+            originalAnchorPos = compound.AnchorPoint;   // запоминаем текущее положение якоря
+
+            draggingAnchor = true;
+            ellipse.CaptureMouse();
+            e.Handled = true;
+        }
+
+        private void CompoundAnchor_Move(object sender, MouseEventArgs e)
+        {
+            if (!draggingAnchor || _currentShape is not CompoundShape compound || _currentShapeVisual == null)
+                return;
+
+            if (_isProcessingMove) return;
+            _isProcessingMove = true;
+
+            try
+            {
+                Point currentMouse = e.GetPosition(DrawCanvas);
+                Vector deltaWorld = currentMouse - dragStartWorld;
+
+                // Меняем только AnchorPoint
+                Vector deltaLocal = deltaWorld / compound.Scale;
+                compound.AnchorPoint = new Point(
+                    Math.Round(originalAnchorPos.X + deltaLocal.X, 2),
+                    Math.Round(originalAnchorPos.Y + deltaLocal.Y, 2));
+
+                // Обновляем ТОЛЬКО позицию фиолетовой точки внутри Canvas
+                UpdateOnlyGroupAnchorVisualPosition();
+            }
+            finally
+            {
+                _isProcessingMove = false;
+            }
+        }
+
+        private void UpdateOnlyGroupAnchorVisualPosition()
+        {
+            if (_currentShapeVisual == null || _currentShape is not CompoundShape compound) return;
+
+            var anchorEllipse = _currentShapeVisual.Children
+                .OfType<Ellipse>()
+                .FirstOrDefault(el => el.Tag?.ToString() == "Anchor");
+
+            if (anchorEllipse == null) return;
+
+            // 1. Вычисляем "сырые" границы детей (как в Build)
+            double rawMinX = double.MaxValue, rawMaxX = double.MinValue;
+            double rawMinY = double.MaxValue, rawMaxY = double.MinValue;
+
+            foreach (var child in compound.ChildShapes)
+            {
+                rawMinX = Math.Min(rawMinX, child.AnchorPoint.X + child.MinX);
+                rawMaxX = Math.Max(rawMaxX, child.AnchorPoint.X + child.MaxX);
+                rawMinY = Math.Min(rawMinY, child.AnchorPoint.Y + child.MinY);
+                rawMaxY = Math.Max(rawMaxY, child.AnchorPoint.Y + child.MaxY);
+            }
+
+            // 2. Центр группы в локальных координатах
+            double centerX = (rawMinX + rawMaxX) / 2;
+            double centerY = (rawMinY + rawMaxY) / 2;
+
+            // 3. Позиция якоря внутри контейнера: (AnchorPoint - center) * Scale + half
+            double halfW = _currentShapeVisual.Width / 2;
+            double halfH = _currentShapeVisual.Height / 2;
+
+            double anchorX = (compound.AnchorPoint.X - centerX) * compound.Scale + halfW;
+            double anchorY = (compound.AnchorPoint.Y - centerY) * compound.Scale + halfH;
+
+            Canvas.SetLeft(anchorEllipse, anchorX - 5); // -5 для центрирования самой точки (10px)
+            Canvas.SetTop(anchorEllipse, anchorY - 5);
+
+            if (_paramsPanelIsOpen)
+                RefreshParamsPanelValues();
+        }
+
+
+        private void CompoundAnchor_Up(object sender, MouseButtonEventArgs e)
+        {
+            (sender as Ellipse)?.ReleaseMouseCapture();
+            draggingAnchor = false;
+            anchorDragCanvas = null;
+            e.Handled = true;
+        }
+
+
+
+
+
+        private void ShowBoundingBoxForNestedChild(Canvas childVisual, Canvas parentVisual)
+        {
+            ClearBoundingBox();
+            if (childVisual == null) return;
+
+            // Мировая позиция родителя
+            double parentLeft = Canvas.GetLeft(parentVisual);
+            double parentTop = Canvas.GetTop(parentVisual);
+
+            // Локальная позиция ребёнка внутри родителя
+            double childLocalLeft = Canvas.GetLeft(childVisual);
+            double childLocalTop = Canvas.GetTop(childVisual);
+
+            // Итоговая мировая позиция
+            double worldLeft = parentLeft + childLocalLeft;
+            double worldTop = parentTop + childLocalTop;
+
+            _boundingBoxVisual = new Rectangle
+            {
+                Width = childVisual.ActualWidth > 0 ? childVisual.ActualWidth : childVisual.Width,
+                Height = childVisual.ActualHeight > 0 ? childVisual.ActualHeight : childVisual.Height,
+                Stroke = Brushes.DodgerBlue,
+                StrokeThickness = 2,
+                StrokeDashArray = new DoubleCollection { 4, 2 },
+                Fill = Brushes.Transparent,
+                IsHitTestVisible = false
+            };
+
+            Canvas.SetLeft(_boundingBoxVisual, worldLeft);
+            Canvas.SetTop(_boundingBoxVisual, worldTop);
+            DrawCanvas.Children.Add(_boundingBoxVisual);
+        }
+
+
     }
+
 }

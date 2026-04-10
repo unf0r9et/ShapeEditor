@@ -10,6 +10,7 @@ namespace ShapeEditor
             SidesCount = 4;
         }
 
+        public override string DisplayNameRu => "Трапеция";
         public override string[] SideNames => new[] { "Верхняя", "Правая боковая", "Нижняя", "Левая боковая" };
 
         // Если true — при изменении одной боковой стороны зеркально применяем к другой

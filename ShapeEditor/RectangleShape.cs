@@ -9,7 +9,8 @@ namespace ShapeEditor
         {
             SidesCount = 4;
         }
-
+        // RectangleShape.cs
+        public override string DisplayNameRu => "Прямоугольник";
         public override string[] SideNames => new[] { "Верхняя", "Правая", "Нижняя", "Левая" };
 
         protected override Point[] GetDefaultVertices()
