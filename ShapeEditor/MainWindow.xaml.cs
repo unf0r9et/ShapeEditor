@@ -36,8 +36,8 @@ namespace ShapeEditor
         private Canvas _selectedShapeVisual;
         private Rectangle _boundingBoxVisual;
 
-        private List<ShapeBase> _allShapes = new();
-        private List<Canvas> _allShapeVisuals = new();
+        private ShapeBase[] _allShapes = new ShapeBase[0];
+        private Canvas[] _allShapeVisuals = new Canvas[0];
 
         private bool _isProcessingMove;
 
@@ -104,7 +104,7 @@ namespace ShapeEditor
         private List<Canvas> _selectedVisuals = new();
 
 
-
+        private List<ShapeTreeItem> _treeRootItems = new();
 
         public MainWindow()
         {
@@ -163,8 +163,7 @@ namespace ShapeEditor
             DrawCanvas.UpdateLayout();
             var visual = CreateShapeVisual(custom, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
             DrawCanvas.Children.Add(visual);
-            _allShapes.Add(custom);
-            _allShapeVisuals.Add(visual);
+            AddShapeToArray(custom, visual); // ИСПРАВЛЕНО
 
             // Ставим в режим создания
             _isCreatingCustomShape = true;
@@ -173,6 +172,7 @@ namespace ShapeEditor
 
             // Выбираем этот визуал — чтобы в панели отобразились элементы создания
             SelectShape(visual);
+            RefreshShapesTree();
         }
 
         private void AddCompoundShape(object sender, RoutedEventArgs e)
@@ -182,9 +182,10 @@ namespace ShapeEditor
 
             var visual = CreateShapeVisual(compound, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
             DrawCanvas.Children.Add(visual);
-            _allShapes.Add(compound);
-            _allShapeVisuals.Add(visual);
+            AddShapeToArray(compound, visual); // ИСПРАВЛЕНО
+
             SelectShape(visual);
+            RefreshShapesTree();
         }
 
         private void DrawCanvas_BackgroundClick(object sender, MouseButtonEventArgs e)
@@ -208,8 +209,7 @@ namespace ShapeEditor
                     DrawCanvas.Children.Remove(_boundingBoxVisual);
 
                 // Удаляем из списков
-                _allShapeVisuals.Remove(_selectedShapeVisual);
-                _allShapes.Remove(_currentShape);
+                RemoveShapeFromArray(_currentShape);
 
                 // Снимаем выделение
                 _selectedShapeVisual = null;
@@ -255,10 +255,10 @@ namespace ShapeEditor
 
             var visual = CreateShapeVisual(shapeBase, worldAnchor.X, worldAnchor.Y);
             DrawCanvas.Children.Add(visual);
-            _allShapes.Add(shapeBase);
-            _allShapeVisuals.Add(visual);
+            AddShapeToArray(shapeBase, visual);
 
             SelectShape(visual);
+            RefreshShapesTree();
         }
 
         private void SelectShape(Canvas shapeVisual)
@@ -418,9 +418,12 @@ namespace ShapeEditor
             _currentShapeVisual = newVisual;
 
             // Если модель присутствует в списке всех фигур — обновляем соответствующий визуал в _allShapeVisuals
-            int idx = _allShapes.IndexOf(_currentShape);
-            if (idx >= 0)
-                _allShapeVisuals[idx] = newVisual;
+            // В методе RedrawPreservingAnchor:
+            int idx = Array.IndexOf(_allShapes, _currentShape); // ИСПРАВЛЕНО
+
+            // В методе OnCloseCreatingShape:
+            int shapeIndex = Array.IndexOf(_allShapes, _creatingCustomShape); // ИСПРАВЛЕНО            if (idx >= 0)
+            _allShapeVisuals[idx] = newVisual;
 
             if (wasSelected)
             {
@@ -938,8 +941,8 @@ namespace ShapeEditor
 
                         var childVisual = CreateShapeVisual(child, worldX, worldY);
                         DrawCanvas.Children.Add(childVisual);
-                        _allShapes.Add(child);
-                        _allShapeVisuals.Add(childVisual);
+                        AddShapeToArray(child, childVisual);
+
 
                         RedrawPreservingAnchor();
                         RebuildParamsPanel();
@@ -1932,14 +1935,16 @@ namespace ShapeEditor
 
             if (DrawCanvas.Children.Contains(_currentShapeVisual))
                 DrawCanvas.Children.Remove(_currentShapeVisual);
+
             if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
                 DrawCanvas.Children.Remove(_boundingBoxVisual);
 
+            // Создаем новый визуал
             _currentShapeVisual = CreateShapeVisual(_currentShape, worldAnchor.X, worldAnchor.Y);
             DrawCanvas.Children.Add(_currentShapeVisual);
 
-            // Обновляем глобальный список визуалов, если фигура там есть
-            int idx = _allShapes.IndexOf(_currentShape);
+            // Обновляем глобальный список визуалов (ИСПРАВЛЕНО: используем _currentShapeVisual вместо newVisual)
+            int idx = Array.IndexOf(_allShapes, _currentShape);
             if (idx >= 0)
                 _allShapeVisuals[idx] = _currentShapeVisual;
 
@@ -1949,13 +1954,12 @@ namespace ShapeEditor
                 ShowBoundingBox(_currentShapeVisual);
             }
 
-            // Обновление панели параметров при перетаскивании якоря
             if (_paramsPanelIsOpen) RefreshParamsPanelValues();
 
-            // Восстанавливаем захват мыши для точки якоря
+            // Восстанавливаем захват мыши
             foreach (UIElement child in _currentShapeVisual.Children)
             {
-                if (child is Ellipse ellipse && ellipse.Tag is string tag && tag == "Anchor")
+                if (child is Ellipse ellipse && ellipse.Tag?.ToString() == "Anchor")
                 {
                     ellipse.CaptureMouse();
                     break;
@@ -2215,7 +2219,7 @@ namespace ShapeEditor
             // Перерендерим визу и обновим ссылку в списках
             var newVisual = CreateShapeVisual(_creatingCustomShape, worldAnchor.X, worldAnchor.Y);
 
-            int shapeIndex = _allShapes.IndexOf(_creatingCustomShape);
+            int shapeIndex = Array.IndexOf(_allShapes, _creatingCustomShape); // ИСПРАВЛЕНО
             if (shapeIndex >= 0)
             {
                 // заменяем в списке и добавляем на холст
@@ -2235,28 +2239,31 @@ namespace ShapeEditor
             _creatingCustomShape = null;
             ClearCustomCreationState();
             MessageBox.Show("Фигура замкнута.");
+            RefreshShapesTree();
         }
 
-        private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
-        {
-            if (!_isCreatingCustomShape || _creatingCustomShape == null) return;
+private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
+{
+    if (!_isCreatingCustomShape || _creatingCustomShape == null) return;
 
-            // Удаляем визуал и модель, откатываем
-            var idx = _allShapes.IndexOf(_creatingCustomShape);
-            if (idx >= 0)
-            {
-                var visual = _allShapeVisuals[idx];
-                if (DrawCanvas.Children.Contains(visual)) DrawCanvas.Children.Remove(visual);
-                _allShapes.RemoveAt(idx);
-                _allShapeVisuals.RemoveAt(idx);
-            }
+    // 1. Сначала находим визуал, чтобы удалить его с экрана
+    int idx = Array.IndexOf(_allShapes, _creatingCustomShape);
+    if (idx >= 0)
+    {
+        var visual = _allShapeVisuals[idx];
+        if (DrawCanvas.Children.Contains(visual)) 
+            DrawCanvas.Children.Remove(visual);
+    }
 
-            _isCreatingCustomShape = false;
-            _creatingCustomShape = null;
-            ClearCustomCreationState();
-            ClearSelection();
-        }
+    // 2. Удаляем саму модель из массивов (ИСПРАВЛЕНО: используем наш метод вместо RemoveAt)
+    RemoveShapeFromArray(_creatingCustomShape);
 
+    _isCreatingCustomShape = false;
+    _creatingCustomShape = null;
+    ClearCustomCreationState();
+    ClearSelection();
+    RefreshShapesTree();
+}
         // Помощники — подсветка сегмента и очистка состояния создания
         private void UpdateCustomSegmentHighlight(params int[] indices)
         {
@@ -2580,6 +2587,7 @@ namespace ShapeEditor
             ClearBoundingBox();
             RedrawPreservingAnchor();  // Перестроит родителя с новыми координатами ребёнка
             RebuildParamsPanel();
+            RefreshShapesTree();
         }
 
         private void HighlightChildInCompound(CompoundShape parent, int childIndex)
@@ -2660,8 +2668,7 @@ namespace ShapeEditor
                     // Удаляем старую группу
                     nestedCompound.ChildShapes.Clear();
                     DrawCanvas.Children.Remove(vis);
-                    _allShapes.Remove(nestedCompound);
-                    _allShapeVisuals.Remove(vis);
+                    RemoveShapeFromArray(compound);
                 }
                 else
                 {
@@ -2674,18 +2681,17 @@ namespace ShapeEditor
 
                     compound.AddChildShape(shape);
                     DrawCanvas.Children.Remove(vis);
-                    _allShapes.Remove(shape);
-                    _allShapeVisuals.Remove(vis);
+                    RemoveShapeFromArray(shape);
                 }
             }
 
             var groupVisual = CreateShapeVisual(compound, groupWorldAnchor.X, groupWorldAnchor.Y);
             DrawCanvas.Children.Add(groupVisual);
-            _allShapes.Add(compound);
-            _allShapeVisuals.Add(groupVisual);
+            AddShapeToArray(compound, groupVisual);
 
             _selectedVisuals.Clear();
             SelectShape(groupVisual);
+            RefreshShapesTree();
         }
 
         // 🔹 Вспомогательный метод: вычисление мировой позиции ребёнка внутри вложенной группы
@@ -2731,16 +2737,15 @@ namespace ShapeEditor
                 // Возвращаем на холст как независимую фигуру
                 var childVis = CreateShapeVisual(child, worldX, worldY);
                 DrawCanvas.Children.Add(childVis);
-                _allShapes.Add(child);
-                _allShapeVisuals.Add(childVis);
+                AddShapeToArray(child, childVis);
             }
 
             // Удаляем саму группу
-            _allShapes.Remove(compound);
-            _allShapeVisuals.Remove(_currentShapeVisual);
+            RemoveShapeFromArray(compound);
             DrawCanvas.Children.Remove(_currentShapeVisual);
 
             ClearSelection();
+            RefreshShapesTree();
         }
 
 
@@ -2772,11 +2777,11 @@ namespace ShapeEditor
             {
                 var shape = vis.Tag as ShapeBase;
                 DrawCanvas.Children.Remove(vis);
-                _allShapes.Remove(shape);
-                _allShapeVisuals.Remove(vis);
+                RemoveShapeFromArray(shape);
             }
             _selectedVisuals.Clear();
             ClearSelection();
+            RefreshShapesTree();
         }
 
         public static bool IsEditingThisChild(CompoundShape parent, ShapeBase child)
@@ -2917,6 +2922,106 @@ namespace ShapeEditor
             Canvas.SetTop(_boundingBoxVisual, worldTop);
             DrawCanvas.Children.Add(_boundingBoxVisual);
         }
+
+
+
+        private void RefreshShapesTree()
+        {
+            _treeRootItems.Clear();
+
+            // Массив можно перебирать так же, как список
+            foreach (var shape in _allShapes)
+            {
+                var item = new ShapeTreeItem(shape);
+                if (shape is CompoundShape compound)
+                {
+                    foreach (var child in compound.ChildShapes)
+                    {
+                        item.Children.Add(new ShapeTreeItem(child));
+                    }
+                }
+                _treeRootItems.Add(item);
+            }
+
+            ShapesTreeView.ItemsSource = null;
+            ShapesTreeView.ItemsSource = _treeRootItems;
+        }
+        // ======================= ПОДСВЕТКА ПРИ ВЫБОРЕ =======================
+
+        private void ShapesTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+        {
+            if (e.NewValue is not ShapeTreeItem treeItem || treeItem.Shape == null)
+                return;
+
+            HighlightShapeOnCanvas(treeItem.Shape);
+        }
+
+        private void HighlightShapeOnCanvas(ShapeBase shape)
+        {
+            ClearBoundingBox();
+
+            // Ищем визуал этой фигуры
+            var visual = _allShapeVisuals.FirstOrDefault(v => ReferenceEquals(v.Tag, shape));
+            if (visual == null) return;
+
+            if (shape is CompoundShape)
+            {
+                ShowBoundingBox(visual);                    // подсвечиваем всю группу
+            }
+            else
+            {
+                ShowBoundingBox(visual);
+            }
+        }
+
+        private void HighlightShape(ShapeBase shape)
+        {
+            ClearBoundingBox();
+
+            // Ищем визуал этой фигуры
+            var visual = _allShapeVisuals.FirstOrDefault(v => v.Tag == shape);
+            if (visual == null) return;
+
+            if (shape is CompoundShape)
+            {
+                // Для группы используем обычный bounding box
+                ShowBoundingBox(visual);
+            }
+            else
+            {
+                // Для обычной фигуры — стандартный bounding box
+                ShowBoundingBox(visual);
+            }
+        }
+
+
+        private void AddShapeToArray(ShapeBase shape, Canvas visual)
+        {
+            Array.Resize(ref _allShapes, _allShapes.Length + 1);
+            Array.Resize(ref _allShapeVisuals, _allShapeVisuals.Length + 1);
+            _allShapes[_allShapes.Length - 1] = shape;
+            _allShapeVisuals[_allShapeVisuals.Length - 1] = visual;
+        }
+
+        private void RemoveShapeFromArray(ShapeBase shape)
+        {
+            int index = Array.IndexOf(_allShapes, shape);
+            if (index < 0) return;
+
+            ShapeBase[] newShapes = new ShapeBase[_allShapes.Length - 1];
+            Canvas[] newVisuals = new Canvas[_allShapeVisuals.Length - 1];
+
+            for (int i = 0, j = 0; i < _allShapes.Length; i++)
+            {
+                if (i == index) continue;
+                newShapes[j] = _allShapes[i];
+                newVisuals[j] = _allShapeVisuals[i];
+                j++;
+            }
+            _allShapes = newShapes;
+            _allShapeVisuals = newVisuals;
+        }
+
 
 
     }

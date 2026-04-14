@@ -123,7 +123,28 @@
                         </Button>
                     </StackPanel>
                 </ScrollViewer>
+                <!-- === СПИСОК ФИГУР (выпадающий) === -->
+                <Expander DockPanel.Dock="Top"
+          Header="Список фигур на холсте"
+          Margin="12,16,12,8"
+          Background="White"
+          BorderBrush="#DDDDDD"
+          BorderThickness="1"
+          IsExpanded="True">
 
+                    <TreeView x:Name="ShapesTreeView"
+              BorderThickness="0"
+              SelectedItemChanged="ShapesTreeView_SelectedItemChanged"
+              Height="280">
+                        <TreeView.ItemTemplate>
+                            <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                <TextBlock Text="{Binding DisplayText}" 
+                           Padding="6,4" 
+                           FontSize="13"/>
+                            </HierarchicalDataTemplate>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
+                </Expander>
                 <!-- Настройки внизу панели -->
                 <!-- Внутри DockPanel, после ScrollViewer с кнопками фигур -->
                 <Border x:Name="ParamsContainer"
