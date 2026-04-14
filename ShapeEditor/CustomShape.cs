@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -421,6 +422,57 @@ namespace ShapeEditor
 
                 return canvas;
             }
+        }
+
+        public override void Save(BinaryWriter writer)
+        {
+            base.Save(writer);
+            writer.Write(InitialDirection);
+            writer.Write(IsClosed);
+            writer.Write(Segments.Count);
+            foreach (var segment in Segments)
+            {
+                writer.Write(segment.Name.Length);
+                writer.Write(segment.Name.ToCharArray());  // <-- Исправлено
+                writer.Write(segment.Length);
+                writer.Write(segment.Thickness);
+                writer.Write(segment.AngleToNext);
+                writer.Write(segment.AngleLocked);
+                writer.Write(segment.LengthLocked);
+                var c = segment.Color is SolidColorBrush sc ? sc.Color : Colors.Black;
+                writer.Write(c.A);
+                writer.Write(c.R);
+                writer.Write(c.G);
+                writer.Write(c.B);
+            }
+        }
+        public override void Load(BinaryReader reader)
+        {
+            base.Load(reader);
+            InitialDirection = reader.ReadDouble();
+            IsClosed = reader.ReadBoolean();
+            int segmentCount = reader.ReadInt32();
+            Segments.Clear();
+            SidesCount = 0;
+            for (int i = 0; i < segmentCount; i++)
+            {
+                var segment = new LineSegment();
+                int nameLen = reader.ReadInt32();
+                segment.Name = new string(reader.ReadChars(nameLen));
+                segment.Length = reader.ReadDouble();
+                segment.Thickness = reader.ReadDouble();
+                segment.AngleToNext = reader.ReadDouble();
+                segment.AngleLocked = reader.ReadBoolean();
+                segment.LengthLocked = reader.ReadBoolean();
+                byte a = reader.ReadByte();
+                byte r = reader.ReadByte();
+                byte g = reader.ReadByte();
+                byte b = reader.ReadByte();
+                segment.Color = new SolidColorBrush(Color.FromArgb(a, r, g, b));
+                Segments.Add(segment);
+                SidesCount++;
+            }
+            RebuildVertices();
         }
     }
 }

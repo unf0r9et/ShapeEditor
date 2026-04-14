@@ -169,7 +169,6 @@
         </Border>
 
         <!-- Холст для рисования -->
-        <!-- Холст для рисования -->
         <Canvas x:Name="DrawCanvas" 
         Grid.Column="1" 
         Background="White"
@@ -178,6 +177,25 @@
             <!-- Добавили событие открытия меню -->
             <Canvas.ContextMenu>
                 <ContextMenu x:Name="MainContextMenu">
+                    <MenuItem Header="Файл">
+                        <MenuItem Header="Сохранить..." Click="SaveMenuItem_Click">
+                            <MenuItem.Icon>
+                                <materialDesign:PackIcon Kind="ContentSave" Width="20" Height="20"/>
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="Загрузить..." Click="LoadMenuItem_Click">
+                            <MenuItem.Icon>
+                                <materialDesign:PackIcon Kind="FolderOpen" Width="20" Height="20"/>
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <Separator/>
+                        <MenuItem Header="Очистить холст" Click="ClearCanvasMenuItem_Click" Foreground="DarkRed">
+                            <MenuItem.Icon>
+                                <materialDesign:PackIcon Kind="DeleteSweep" Width="20" Height="20" Foreground="DarkRed"/>
+                            </MenuItem.Icon>
+                        </MenuItem>
+                    </MenuItem>
+                    <Separator/>
                     <!-- Сгруппировать -->
                     <MenuItem x:Name="GroupMenu" Header="Сгруппировать" Click="GroupMenuItem_Click">
                         <MenuItem.Icon>

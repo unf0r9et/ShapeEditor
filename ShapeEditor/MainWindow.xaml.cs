@@ -7,6 +7,9 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Linq;
 using Drawing = System.Drawing;
+using System.IO;
+using System.Reflection;
+using Microsoft.Win32;
 
 namespace ShapeEditor
 {
@@ -106,6 +109,10 @@ namespace ShapeEditor
 
         private List<ShapeTreeItem> _treeRootItems = new();
 
+        private const string FILE_EXTENSION = ".shapes";
+        private const string FILE_FILTER = "Файлы фигур (*.shapes)|*.shapes|Все файлы (*.*)|*.*";
+        private const string FILE_HEADER = "SHAPEEDITOR";
+        private const int FILE_VERSION = 1;
         public MainWindow()
         {
             InitializeComponent();
@@ -161,6 +168,8 @@ namespace ShapeEditor
 
             // Добавляем в списки и создаём пустой визуал в центре
             DrawCanvas.UpdateLayout();
+            custom.Id = GetNextAvailableId(); // НАЗНАЧАЕМ ID ТУТ
+
             var visual = CreateShapeVisual(custom, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
             DrawCanvas.Children.Add(visual);
             AddShapeToArray(custom, visual); // ИСПРАВЛЕНО
@@ -179,6 +188,7 @@ namespace ShapeEditor
         {
             var compound = new CompoundShape();
             // Список пуст изначально!
+            compound.Id = GetNextAvailableId(); // НАЗНАЧАЕМ ID ТУТ
 
             var visual = CreateShapeVisual(compound, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
             DrawCanvas.Children.Add(visual);
@@ -252,6 +262,7 @@ namespace ShapeEditor
                 shapeBase.SideColors.Add(Brushes.Black);
                 shapeBase.SideThickness.Add(3.0);
             }
+            shapeBase.Id = GetNextAvailableId(); // НАЗНАЧАЕМ ID ТУТ
 
             var visual = CreateShapeVisual(shapeBase, worldAnchor.X, worldAnchor.Y);
             DrawCanvas.Children.Add(visual);
@@ -941,6 +952,8 @@ namespace ShapeEditor
 
                         var childVisual = CreateShapeVisual(child, worldX, worldY);
                         DrawCanvas.Children.Add(childVisual);
+                        child.Id = GetNextAvailableId(); // Перед добавлением на холст
+
                         AddShapeToArray(child, childVisual);
 
 
@@ -2611,6 +2624,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             if (_selectedVisuals.Count < 2) return;
 
             var compound = new CompoundShape();
+            compound.Id = GetNextAvailableId(); // Группа получает свободный ID
 
             // === 1. Считаем общие границы ВСЕХ фигур (с учётом вложенных) ===
             double minX = double.MaxValue, minY = double.MaxValue;
@@ -2733,6 +2747,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                 child.AnchorPoint = new Point(0, 0); // Сбрасываем для удобства на холсте
                 child.Scale *= _currentShape.Scale;
                 child.Angle += _currentShape.Angle;
+                child.Id = GetNextAvailableId(); // Каждая извлеченная фигура ищет свободный ID
 
                 // Возвращаем на холст как независимую фигуру
                 var childVis = CreateShapeVisual(child, worldX, worldY);
@@ -3022,6 +3037,267 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             _allShapeVisuals = newVisuals;
         }
 
+        private int GetNextAvailableId()
+        {
+            int id = 1;
+            // Пока в массиве есть фигура с таким ID, увеличиваем счетчик
+            while (_allShapes.Any(s => s.Id == id))
+            {
+                id++;
+            }
+            return id;
+        }
+
+
+
+        // Обработчики меню
+        private void SaveMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            var saveDialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = FILE_FILTER,
+                DefaultExt = FILE_EXTENSION,
+                AddExtension = true,
+                Title = "Сохранить фигуры",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+            };
+
+            if (saveDialog.ShowDialog() == true)
+            {
+                try
+                {
+                    SaveAllShapes(saveDialog.FileName);
+                    MessageBox.Show($"Фигуры успешно сохранены в:\n{saveDialog.FileName}",
+                                   "Сохранение", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка при сохранении:\n{ex.Message}",
+                                   "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        private void LoadMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if (_allShapes.Length > 0)
+            {
+                var result = MessageBox.Show(
+                    "На холсте есть фигуры. Загрузка удалит текущие фигуры.\nПродолжить?",
+                    "Подтверждение",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+
+                if (result != MessageBoxResult.Yes)
+                    return;
+            }
+
+            var openDialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = FILE_FILTER,
+                DefaultExt = FILE_EXTENSION,
+                Title = "Загрузить фигуры",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+            };
+
+            if (openDialog.ShowDialog() == true)
+            {
+                try
+                {
+                    LoadAllShapes(openDialog.FileName);
+                    MessageBox.Show($"Фигуры успешно загружены из:\n{openDialog.FileName}",
+                                   "Загрузка", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка при загрузке:\n{ex.Message}",
+                                   "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        private void ClearCanvasMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if (_allShapes.Length == 0) return;
+            var result = MessageBox.Show("Удалить все фигуры с холста?", "Подтверждение",
+                                        MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result == MessageBoxResult.Yes) ClearAllShapes();
+        }
+
+        // Методы сохранения/загрузки всех фигур
+        private void SaveAllShapes(string filename)
+        {
+            using (var stream = new FileStream(filename, FileMode.Create, FileAccess.Write))
+            using (var writer = new BinaryWriter(stream))
+            {
+                writer.Write(FILE_HEADER);
+                writer.Write(FILE_VERSION);
+                writer.Write(_allShapes.Length);
+
+                for (int i = 0; i < _allShapes.Length; i++)
+                {
+                    var shape = _allShapes[i];
+                    var visual = _allShapeVisuals[i];
+                    Point worldAnchor = shape.GetAnchorWorldPosition(visual);
+                    writer.Write(worldAnchor.X);
+                    writer.Write(worldAnchor.Y);
+                    shape.Save(writer);
+                }
+            }
+        }// Вспомогательный метод для безопасного чтения
+
+
+        private void LoadAllShapes(string filename)
+        {
+            var fileInfo = new FileInfo(filename);
+            if (fileInfo.Length == 0)
+            {
+                throw new InvalidDataException("Файл пустой");
+            }
+
+            using (var stream = new FileStream(filename, FileMode.Open, FileAccess.Read))
+            using (var reader = new BinaryReader(stream))
+            {
+                if (stream.Length < 10)
+                {
+                    throw new InvalidDataException($"Файл слишком маленький ({stream.Length} байт)");
+                }
+
+                string header = reader.ReadString();
+                if (header != FILE_HEADER)
+                    throw new InvalidDataException("Неверный формат файла");
+
+                int version = reader.ReadInt32();
+                if (version != FILE_VERSION)
+                    throw new NotSupportedException($"Неподдерживаемая версия формата: {version}");
+
+                int shapeCount = reader.ReadInt32();
+                ClearAllShapes();
+
+                // Сначала загружаем все фигуры во временный список
+                var loadedShapes = new List<(ShapeBase shape, double worldX, double worldY)>();
+
+                for (int i = 0; i < shapeCount; i++)
+                {
+                    double worldX = reader.ReadDouble();
+                    double worldY = reader.ReadDouble();
+
+                    int typeNameLength = reader.ReadInt32();
+                    string typeName = new string(reader.ReadChars(typeNameLength));
+
+                    ShapeBase shape = CreateShapeByType(typeName);
+                    if (shape == null)
+                    {
+                        SkipShapeData(reader);
+                        continue;
+                    }
+
+                    shape.Load(reader);
+                    loadedShapes.Add((shape, worldX, worldY));
+                }
+
+                // Теперь создаем визуалы и добавляем на холст
+                // Для составных фигур сначала нужно построить детей, чтобы вычислились их границы
+                foreach (var (shape, worldX, worldY) in loadedShapes)
+                {
+                    // Для составной фигуры сначала строим всех детей в "холостом" режиме
+                    // чтобы у них вычислились MinX, MinY, MaxX, MaxY
+                    if (shape is CompoundShape compound)
+                    {
+                        PreBuildCompoundChildren(compound);
+                    }
+
+                    var visual = CreateShapeVisual(shape, worldX, worldY);
+                    DrawCanvas.Children.Add(visual);
+                    AddShapeToArray(shape, visual);
+                }
+
+                RefreshShapesTree();
+                ClearSelection();
+            }
+        }
+
+        /// <summary>
+        /// Предварительно строит детей составной фигуры, чтобы вычислились их границы
+        /// </summary>
+        private void PreBuildCompoundChildren(CompoundShape compound)
+        {
+            foreach (var child in compound.ChildShapes)
+            {
+                // Рекурсивно для вложенных групп
+                if (child is CompoundShape childCompound)
+                {
+                    PreBuildCompoundChildren(childCompound);
+                }
+
+                // Строим ребенка в (0,0) - это вычислит его MinX, MinY, MaxX, MaxY
+                // но не добавляем на холст
+                var tempVisual = child.Build(0, 0);
+                // Визуал сразу удаляем, нам нужны только вычисленные границы
+                tempVisual.Children.Clear();
+            }
+        }
+        private ShapeBase CreateShapeByType(string typeName)
+        {
+            return typeName switch
+            {
+                "RectangleShape" => new RectangleShape(),
+                "TriangleShape" => new TriangleShape(),
+                "TrapezoidShape" => new TrapezoidShape(),
+                "CircleShape" => new CircleShape(),
+                "HexagonShape" => new HexagonShape(),
+                "CustomShape" => new CustomShape(),
+                "CompoundShape" => new CompoundShape(),
+                _ => null
+            };
+        }
+
+        private void SkipShapeData(BinaryReader reader)
+        {
+            reader.ReadInt32(); reader.ReadDouble(); reader.ReadDouble();
+            reader.ReadDouble(); reader.ReadDouble();
+            reader.ReadByte(); reader.ReadByte(); reader.ReadByte(); reader.ReadByte();
+            int colorCount = reader.ReadInt32();
+            for (int i = 0; i < colorCount; i++)
+            {
+                reader.ReadByte(); reader.ReadByte(); reader.ReadByte(); reader.ReadByte();
+            }
+            int thickCount = reader.ReadInt32();
+            for (int i = 0; i < thickCount; i++) reader.ReadDouble();
+            int lockCount = reader.ReadInt32();
+            for (int i = 0; i < lockCount; i++) reader.ReadBoolean();
+            int vertCount = reader.ReadInt32();
+            for (int i = 0; i < vertCount; i++)
+            {
+                reader.ReadDouble(); reader.ReadDouble();
+            }
+            reader.ReadInt32();
+        }
+
+        private void ClearAllShapes()
+        {
+            foreach (var visual in _allShapeVisuals)
+            {
+                if (DrawCanvas.Children.Contains(visual))
+                    DrawCanvas.Children.Remove(visual);
+            }
+            ClearBoundingBox();
+            _allShapes = new ShapeBase[0];
+            _allShapeVisuals = new Canvas[0];
+            _selectedVisuals.Clear();
+            _selectedShapeVisual = null;
+            _currentShape = null;
+            _currentShapeVisual = null;
+
+            // Сброс ID через рефлексию
+            var field = typeof(ShapeBase).GetField("_globalIdCounter",
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Static);
+            field?.SetValue(null, 0);
+
+            RefreshShapesTree();
+            UpdateParamsPanelVisibility();
+        }
 
 
     }

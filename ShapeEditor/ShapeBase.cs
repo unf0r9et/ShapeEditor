@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.IO;
 
 namespace ShapeEditor
 {
@@ -39,7 +40,7 @@ namespace ShapeEditor
         private static int _globalIdCounter = 0;
 
         // 🔹 Уникальный числовой ID (присваивается при создании)
-        public int Id { get; }
+        public int Id { get; set;}
 
         protected abstract Point[] GetDefaultVertices();
 
@@ -524,6 +525,130 @@ namespace ShapeEditor
             Canvas.SetTop(canvas, anchorWorldY - anchorLocalY + minY);
 
             return canvas;
+        }
+
+
+        public virtual void Save(BinaryWriter writer)
+        {
+            // Тип фигуры
+            string typeName = GetType().Name;
+            writer.Write(typeName.Length);
+            writer.Write(typeName.ToCharArray());  // <-- Исправлено: пишем как массив символов
+
+            // Базовые параметры
+            writer.Write(Id);
+            writer.Write(Scale);
+            writer.Write(Angle);
+            writer.Write(AnchorPoint.X);
+            writer.Write(AnchorPoint.Y);
+
+            // Fill color (ARGB)
+            var fillColor = Fill is SolidColorBrush scb ? scb.Color : Colors.Transparent;
+            writer.Write(fillColor.A);
+            writer.Write(fillColor.R);
+            writer.Write(fillColor.G);
+            writer.Write(fillColor.B);
+
+            // Side colors
+            writer.Write(SideColors.Count);
+            for (int i = 0; i < SideColors.Count; i++)
+            {
+                var c = SideColors[i] is SolidColorBrush sc ? sc.Color : Colors.Black;
+                writer.Write(c.A);
+                writer.Write(c.R);
+                writer.Write(c.G);
+                writer.Write(c.B);
+            }
+
+            // Side thickness
+            writer.Write(SideThickness.Count);
+            for (int i = 0; i < SideThickness.Count; i++)
+            {
+                writer.Write(SideThickness[i]);
+            }
+
+            // Edge locks
+            writer.Write(EdgeLengthLocked.Count);
+            for (int i = 0; i < EdgeLengthLocked.Count; i++)
+            {
+                writer.Write(EdgeLengthLocked[i]);
+            }
+
+            // Vertices
+            writer.Write(Vertices.Length);
+            for (int i = 0; i < Vertices.Length; i++)
+            {
+                writer.Write(Vertices[i].X);
+                writer.Write(Vertices[i].Y);
+            }
+
+            writer.Write(SidesCount);
+        }
+
+        /// <summary>
+        /// Загружает фигуру из бинарного потока
+        /// </summary>
+        public virtual void Load(BinaryReader reader)
+        {
+            Id = reader.ReadInt32();
+            // Обновляем глобальный счетчик
+            var field = typeof(ShapeBase).GetField("_globalIdCounter",
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Static);
+            if (field != null)
+            {
+                int currentCounter = (int)field.GetValue(null);
+                if (Id > currentCounter) field.SetValue(null, Id);
+            }
+
+            Scale = reader.ReadDouble();
+            Angle = reader.ReadDouble();
+            AnchorPoint = new Point(reader.ReadDouble(), reader.ReadDouble());
+
+            // Fill color
+            byte a = reader.ReadByte();
+            byte r = reader.ReadByte();
+            byte g = reader.ReadByte();
+            byte b = reader.ReadByte();
+            Fill = new SolidColorBrush(Color.FromArgb(a, r, g, b));
+
+            // Side colors
+            int colorCount = reader.ReadInt32();
+            SideColors.Clear();
+            for (int i = 0; i < colorCount; i++)
+            {
+                byte ca = reader.ReadByte();
+                byte cr = reader.ReadByte();
+                byte cg = reader.ReadByte();
+                byte cb = reader.ReadByte();
+                SideColors.Add(new SolidColorBrush(Color.FromArgb(ca, cr, cg, cb)));
+            }
+
+            // Side thickness
+            int thickCount = reader.ReadInt32();
+            SideThickness.Clear();
+            for (int i = 0; i < thickCount; i++)
+            {
+                SideThickness.Add(reader.ReadDouble());
+            }
+
+            // Edge locks
+            int lockCount = reader.ReadInt32();
+            EdgeLengthLocked.Clear();
+            for (int i = 0; i < lockCount; i++)
+            {
+                EdgeLengthLocked.Add(reader.ReadBoolean());
+            }
+
+            // Vertices
+            int vertCount = reader.ReadInt32();
+            Vertices = new Point[vertCount];
+            for (int i = 0; i < vertCount; i++)
+            {
+                Vertices[i] = new Point(reader.ReadDouble(), reader.ReadDouble());
+            }
+
+            SidesCount = reader.ReadInt32();
         }
     }
 }
