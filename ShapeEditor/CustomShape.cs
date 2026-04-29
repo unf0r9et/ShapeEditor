@@ -25,22 +25,32 @@ namespace ShapeEditor
         protected override Point[] GetDefaultVertices() => new Point[0];
         public bool IsClosed { get; set; } = false;
 
-        public void AddSegment(double length, double angleToNext = 0)
+        public void AddSegment(double length, double internalAngle = 180)
         {
             var segment = new LineSegment
             {
                 Name = $"Отрезок {Segments.Count + 1}",
                 Length = length,
-                AngleToNext = angleToNext,
                 Color = Brushes.Black,
                 Thickness = 3.0
             };
+
+            if (Segments.Count == 0)
+            {
+                // Первый сегмент: направление 0°, угол поворота пока 0 (задастся при добавлении второго)
+                segment.AngleToNext = 0;
+            }
+            else
+            {
+                // Сохраняем внутренний угол как есть, пересчет в направление в RebuildVertices
+                segment.AngleToNext = internalAngle;
+            }
+
             Segments.Add(segment);
             SidesCount++;
             while (EdgeLengthLocked.Count < SidesCount) EdgeLengthLocked.Add(false);
             RebuildVertices();
         }
-
         public void RemoveSegment(int index)
         {
             if (index >= 0 && index < Segments.Count)
@@ -78,7 +88,7 @@ namespace ShapeEditor
             return edgeIndex >= 0 && edgeIndex < Segments.Count ? Segments[edgeIndex].AngleToNext : 0;
         }
 
-        private void RebuildVertices()
+        public void RebuildVertices()
         {
             if (Segments.Count == 0)
             {
@@ -88,13 +98,17 @@ namespace ShapeEditor
 
             var vertices = new List<Point>();
             Point currentPos = new Point(0, 0);
-            double currentAngle = InitialDirection;
+
+            // Начальное направление - вдоль оси X (0 градусов)
+            double currentAngle = 0;
 
             vertices.Add(currentPos);
 
             for (int i = 0; i < Segments.Count; i++)
             {
                 var segment = Segments[i];
+
+                // Двигаемся в текущем направлении
                 double angleRad = currentAngle * Math.PI / 180.0;
                 Point nextPos = new Point(
                     currentPos.X + segment.Length * Math.Cos(angleRad),
@@ -103,7 +117,10 @@ namespace ShapeEditor
 
                 vertices.Add(nextPos);
                 currentPos = nextPos;
-                currentAngle += segment.AngleToNext;
+
+                // Поворачиваем направление на (180 - внутренний_угол)
+                // Для i=0 (первый сегмент) AngleToNext хранит угол для второго сегмента
+                currentAngle += (180 - segment.AngleToNext);
             }
 
             Vertices = vertices.ToArray();
@@ -131,10 +148,15 @@ namespace ShapeEditor
         /// <summary>
         /// Центрирует точку привязки в центре локальных границ (min/max по вершинам).
         /// </summary>
-        public void CenterAnchorToBounds()
+        /// <summary>
+        /// Центрирует якорь по границам фигуры и возвращает смещение для корректировки позиции Canvas
+        /// </summary>
+        public Vector CenterAnchorToBounds()
         {
-            if (Vertices == null || Vertices.Length == 0) return;
-            double minX = double.MaxValue, maxX = double.MinValue, minY = double.MaxValue, maxY = double.MinValue;
+            if (Vertices == null || Vertices.Length == 0) return new Vector(0, 0);
+
+            double minX = double.MaxValue, maxX = double.MinValue;
+            double minY = double.MaxValue, maxY = double.MinValue;
             foreach (var v in Vertices)
             {
                 minX = Math.Min(minX, v.X);
@@ -143,7 +165,25 @@ namespace ShapeEditor
                 maxY = Math.Max(maxY, v.Y);
             }
 
-            AnchorPoint = new Point((minX + maxX) / 2.0, (minY + maxY) / 2.0);
+            Point newAnchor = new Point((minX + maxX) / 2.0, (minY + maxY) / 2.0);
+
+            // ?? Сдвигаем вершины относительно нового якоря, чтобы они стали локальными
+            // Теперь AnchorPoint в (0,0) — это центр, а вершины вокруг него
+            for (int i = 0; i < Vertices.Length; i++)
+            {
+                Vertices[i] = new Point(
+                    Vertices[i].X - newAnchor.X,
+                    Vertices[i].Y - newAnchor.Y
+                );
+            }
+
+            // Возвращаем, на сколько сместился центр (для корректировки Canvas)
+            Vector anchorShift = new Vector(newAnchor.X - AnchorPoint.X, newAnchor.Y - AnchorPoint.Y);
+
+            // Новый AnchorPoint — центр (0,0) в новой системе координат
+            AnchorPoint = new Point(0, 0);
+
+            return anchorShift;
         }
 
         public override Canvas Build(double anchorWorldX, double anchorWorldY)

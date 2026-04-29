@@ -177,13 +177,15 @@
             <!-- Добавили событие открытия меню -->
             <Canvas.ContextMenu>
                 <ContextMenu x:Name="MainContextMenu">
+
+                    <!-- Файл -->
                     <MenuItem Header="Файл">
                         <MenuItem Header="Сохранить..." Click="SaveMenuItem_Click">
                             <MenuItem.Icon>
                                 <materialDesign:PackIcon Kind="ContentSave" Width="20" Height="20"/>
                             </MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="Загрузить..." Click="LoadMenuItem_Click">
+                        <MenuItem Header="Открыть..." Click="LoadMenuItem_Click">
                             <MenuItem.Icon>
                                 <materialDesign:PackIcon Kind="FolderOpen" Width="20" Height="20"/>
                             </MenuItem.Icon>
@@ -195,7 +197,9 @@
                             </MenuItem.Icon>
                         </MenuItem>
                     </MenuItem>
+
                     <Separator/>
+
                     <!-- Сгруппировать -->
                     <MenuItem x:Name="GroupMenu" Header="Сгруппировать" Click="GroupMenuItem_Click">
                         <MenuItem.Icon>

@@ -23,6 +23,7 @@ namespace ShapeEditor
 
         public void AddChildShape(ShapeBase child)
         {
+
             if (child == null || child is CompoundShape || ChildShapes.Contains(child))
                 return;
             ChildShapes.Add(child);
@@ -115,8 +116,7 @@ namespace ShapeEditor
                 }
             }
 
-            // НЕ вызываем RecalculateBounds() здесь - дети еще не построены
-            // и их MinX/MaxX равны 0
+
         }
         private ShapeBase CreateShapeByType(string typeName)
         {
@@ -201,8 +201,14 @@ namespace ShapeEditor
 
                 Canvas.SetLeft(childVisual, offsetX);
                 Canvas.SetTop(childVisual, offsetY);
-
+                // В CompoundShape.Build() при создании детей:
                 bool isEditingThis = MainWindow.IsEditingThisChild(this, child);
+                bool isHighlightedFromTree = MainWindow.IsHighlightedChild(this, child); 
+
+                foreach (var sub in childVisual.Children.OfType<Ellipse>().Where(e => e.Tag?.ToString() == "Anchor"))
+                {
+                    sub.Visibility = (isEditingThis || isHighlightedFromTree) ? Visibility.Visible : Visibility.Collapsed;
+                }
                 foreach (var sub in childVisual.Children.OfType<Ellipse>().Where(e => e.Tag?.ToString() == "Anchor"))
                     sub.Visibility = isEditingThis ? Visibility.Visible : Visibility.Collapsed;
 

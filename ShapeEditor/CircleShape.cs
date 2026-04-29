@@ -82,6 +82,8 @@ namespace ShapeEditor
             // Минимальные координаты bounding box (левый верхний угол canvas соответствует (-half, -half))
             MinX = -half;
             MinY = -half;
+            MaxX = half;   // <-- ДОБАВИТЬ
+            MaxY = half;
 
             // Позиционируем canvas так, чтобы точка привязки попала в anchorWorldX, anchorWorldY
             Canvas.SetLeft(canvas, anchorWorldX - anchorLocalX + MinX);

@@ -10,46 +10,47 @@ using Drawing = System.Drawing;
 using System.IO;
 using System.Reflection;
 using Microsoft.Win32;
+using System.Text.Json;           
+using System.Globalization;   
 
 namespace ShapeEditor
 {
     public partial class MainWindow : Window
     {
-        // Перетаскивание всей фигуры
+        // Перетаскивание 
         private bool potentialDrag;
         private Point startMouse;
         private Canvas draggedShapeCanvas;
         private double startLeft;
         private double startTop;
-        // Для редактирования ребёнка "на месте"
+        // Для редакта ребёнка 
         private bool _isEditingChildInPlace = false;
-        private Canvas _originalParentVisual = null;    // визуал родителя
-        private Canvas _childNestedVisual = null;        // вложенный визуал ребёнка
-        private double _childWorldX, _childWorldY;       // мировая позиция якоря ребёнка
-        private Point _childOriginalAnchor;              // оригинальный AnchorPoint ребёнка
+        private Canvas _originalParentVisual = null;    
+        private Canvas _childNestedVisual = null;       
+        private double _childWorldX, _childWorldY;      
+        private Point _childOriginalAnchor;              
         // Перетаскивание якоря
         private bool draggingAnchor;
         private Point dragStartWorld;
         private Point originalAnchorPos;
         private Canvas anchorDragCanvas;
 
-        // Текущая фигура и визуал
         private ShapeBase _currentShape;
         private Canvas _currentShapeVisual;
         private Canvas _selectedShapeVisual;
         private Rectangle _boundingBoxVisual;
 
+        // массив 
         private ShapeBase[] _allShapes = new ShapeBase[0];
         private Canvas[] _allShapeVisuals = new Canvas[0];
 
         private bool _isProcessingMove;
 
-        // Панель параметров
+        // панель параметров
         private Button _paramsShowButton;
         private StackPanel _paramsStackPanel;
         private bool _paramsPanelIsOpen = false;
 
-        // Ссылки на динамические элементы (обновляются при каждой перестройке)
         private List<TextBox> _colorTextBoxes = new();
         private List<Border> _colorSwatches = new();
         private List<TextBox> _thicknessTextBoxes = new();
@@ -73,7 +74,7 @@ namespace ShapeEditor
         private TextBox _bboxBottomLeftX, _bboxBottomLeftY;
         private TextBox _bboxTopRightX, _bboxTopRightY;
 
-        // Длины рёбер (граней)
+        // Длины рёбер
         private List<TextBox> _edgeLengthBoxes = new();
         private List<CheckBox> _edgeLockBoxes = new();
         private CheckBox _isoscelesCheckBox;
@@ -84,34 +85,31 @@ namespace ShapeEditor
         // Отложенные значения, введённые пользователем, применяются по потере фокуса или по кнопке Применить
         private List<double?> _pendingEdgeLengths = new();
 
-        // Добавлено в начало класса MainWindow (поля для режима создания кастомной фигуры)
         private bool _isCreatingCustomShape = false;
         private CustomShape _creatingCustomShape = null;
         private int _creatingNextIndex = 0;
 
-        // Контролы панели параметров для создания сегмента
         private TextBox _newSegmentLengthBox;
         private TextBox _newSegmentAngleBox;
         private Button _setSegmentButton;
         private Button _closeShapeButton;
         private Button _cancelCreateButton;
 
-        // Визуал подсветки редактируемого (или последнего) сегмента
         private System.Windows.Shapes.Shape _segmentHighlight = null;
         private UIElement _segmentHighlightContainer = null;
 
         // Поля для работы с комплексными фигурами
-        private CompoundShape _editingParentCompound = null; // Родитель, если мы внутри группы
-        private ShapeBase _childShapeBeforeEdit = null;      // Копия или ссылка для отмены (опционально)
+        public CompoundShape _editingParentCompound = null; 
+        private ShapeBase _childShapeBeforeEdit = null;      
 
         private List<Canvas> _selectedVisuals = new();
 
 
         private List<ShapeTreeItem> _treeRootItems = new();
 
-        private const string FILE_EXTENSION = ".shapes";
-        private const string FILE_FILTER = "Файлы фигур (*.shapes)|*.shapes|Все файлы (*.*)|*.*";
-        private const string FILE_HEADER = "SHAPEEDITOR";
+        private const string FILE_EXTENSION = ".json";
+        private const string FILE_FILTER = "JSON файлы (*.json)|*.json|Все файлы (*.*)|*.*";
+        // private const string FILE_HEADER = "SHAPEEDITOR";
         private const int FILE_VERSION = 1;
         public MainWindow()
         {
@@ -168,18 +166,18 @@ namespace ShapeEditor
 
             // Добавляем в списки и создаём пустой визуал в центре
             DrawCanvas.UpdateLayout();
-            custom.Id = GetNextAvailableId(); // НАЗНАЧАЕМ ID ТУТ
+            //custom.Id = GetNextAvailableId(); // НАЗНАЧАЕМ ID ТУТ
 
             var visual = CreateShapeVisual(custom, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
             DrawCanvas.Children.Add(visual);
-            AddShapeToArray(custom, visual); // ИСПРАВЛЕНО
+            AddShapeToArray(custom, visual); 
 
             // Ставим в режим создания
             _isCreatingCustomShape = true;
             _creatingCustomShape = custom;
             _creatingNextIndex = 0;
 
-            // Выбираем этот визуал — чтобы в панели отобразились элементы создания
+            // Выбираем этот визуал 
             SelectShape(visual);
             RefreshShapesTree();
         }
@@ -187,12 +185,12 @@ namespace ShapeEditor
         private void AddCompoundShape(object sender, RoutedEventArgs e)
         {
             var compound = new CompoundShape();
-            // Список пуст изначально!
-            compound.Id = GetNextAvailableId(); // НАЗНАЧАЕМ ID ТУТ
+            // Список пуст изначально
+            //compound.Id = GetNextAvailableId(); // НАЗНАЧАЕМ ID ТУТ
 
             var visual = CreateShapeVisual(compound, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
             DrawCanvas.Children.Add(visual);
-            AddShapeToArray(compound, visual); // ИСПРАВЛЕНО
+            AddShapeToArray(compound, visual); 
 
             SelectShape(visual);
             RefreshShapesTree();
@@ -218,7 +216,7 @@ namespace ShapeEditor
                 if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
                     DrawCanvas.Children.Remove(_boundingBoxVisual);
 
-                // Удаляем из списков
+                // Удаляем из массива
                 RemoveShapeFromArray(_currentShape);
 
                 // Снимаем выделение
@@ -229,7 +227,7 @@ namespace ShapeEditor
 
                 // Обновляем панель параметров
                 UpdateParamsPanelVisibility();
-
+                RefreshShapesTree();
                 e.Handled = true;
             }
         }
@@ -262,7 +260,7 @@ namespace ShapeEditor
                 shapeBase.SideColors.Add(Brushes.Black);
                 shapeBase.SideThickness.Add(3.0);
             }
-            shapeBase.Id = GetNextAvailableId(); // НАЗНАЧАЕМ ID ТУТ
+            //shapeBase.Id = GetNextAvailableId(); 
 
             var visual = CreateShapeVisual(shapeBase, worldAnchor.X, worldAnchor.Y);
             DrawCanvas.Children.Add(visual);
@@ -496,7 +494,6 @@ namespace ShapeEditor
             if (_currentShape == null || _currentShapeVisual == null || _paramsStackPanel == null)
                 return;
 
-            // Защита: если у фигуры нет вершин (CompoundShape, Circle) — выходим
             if (_currentShape.Vertices == null || _currentShape.Vertices.Length == 0)
                 return;
 
@@ -505,13 +502,12 @@ namespace ShapeEditor
                 if (child is not Grid row || row.ColumnDefinitions.Count != 3)
                     continue;
 
-                // --- ЛОКАЛЬНЫЕ координаты (колонка 1) ---
+                // локальные координаты 
                 if (row.Children.Count > 1 && row.Children[1] is StackPanel localPanel)
                 {
                     var textBoxes = localPanel.Children.OfType<TextBox>().ToList();
                     if (textBoxes.Count >= 2 && textBoxes[0].Tag is int vertexIndex)
                     {
-                        // 🔐 ЗАЩИТА: проверяем, что индекс в пределах массива
                         if (vertexIndex >= 0 && vertexIndex < _currentShape.Vertices.Length)
                         {
                             textBoxes[0].Text = (_currentShape.Vertices[vertexIndex].X - _currentShape.AnchorPoint.X).ToString("0");
@@ -520,13 +516,12 @@ namespace ShapeEditor
                     }
                 }
 
-                // --- ГЛОБАЛЬНЫЕ координаты (колонка 2) ---
+                // глобальные координаты
                 if (row.Children.Count > 2 && row.Children[2] is StackPanel worldPanel)
                 {
                     var worldTextBoxes = worldPanel.Children.OfType<TextBox>().ToList();
                     if (worldTextBoxes.Count >= 2 && worldTextBoxes[0].Tag is int vertexIndex)
                     {
-                        // 🔐 ЗАЩИТА: проверяем индекс
                         if (vertexIndex >= 0 && vertexIndex < _currentShape.Vertices.Length)
                         {
                             Point worldPos = GetVertexWorldPosition(_currentShape, _currentShapeVisual, vertexIndex);
@@ -952,7 +947,7 @@ namespace ShapeEditor
 
                         var childVisual = CreateShapeVisual(child, worldX, worldY);
                         DrawCanvas.Children.Add(childVisual);
-                        child.Id = GetNextAvailableId(); // Перед добавлением на холст
+                        //child.Id = GetNextAvailableId(); 
 
                         AddShapeToArray(child, childVisual);
 
@@ -1278,11 +1273,11 @@ namespace ShapeEditor
                 Width = 50,
                 Margin = new Thickness(6, 0, 4, 0),
                 Text = world.X.ToString("0"),
-                IsReadOnly = false,                       // ← теперь можно редактировать
-                Background = Brushes.White,               // чтобы было видно, что редактируемо
+                IsReadOnly = false,                   
+                Background = Brushes.White,               
                 BorderBrush = Brushes.Gray
             };
-            _worldAnchorXBox.TextChanged += WorldAnchorX_TextChanged;   // ← новый обработчик
+            _worldAnchorXBox.TextChanged += WorldAnchorX_TextChanged;   
 
             _worldAnchorYBox = new TextBox
             {
@@ -1293,7 +1288,7 @@ namespace ShapeEditor
                 Background = Brushes.White,
                 BorderBrush = Brushes.Gray
             };
-            _worldAnchorYBox.TextChanged += WorldAnchorY_TextChanged;   // ← новый обработчик
+            _worldAnchorYBox.TextChanged += WorldAnchorY_TextChanged;   
 
 
             worldRow.Children.Add(_worldAnchorXBox);
@@ -1379,13 +1374,13 @@ namespace ShapeEditor
                 RedrawPreservingAnchor();
 
                 if (_paramsPanelIsOpen)
-                    RefreshParamsPanelValues();   // ← ВАЖНО
+                    RefreshParamsPanelValues();   
             };
 
             _angleTextBox = new TextBox
             {
                 Width = 30,
-                Margin = new Thickness(6, 0, 0, 0),          // ← здесь главное уменьшение: было 12 → стало 8
+                Margin = new Thickness(6, 0, 0, 0),         
                 Text = ((int)_currentShape.Angle).ToString(),
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -1401,7 +1396,7 @@ namespace ShapeEditor
                     RedrawPreservingAnchor();
 
                     if (_paramsPanelIsOpen)
-                        RefreshParamsPanelValues();  // ← ВАЖНО
+                        RefreshParamsPanelValues(); 
                 }
             };
 
@@ -1473,7 +1468,7 @@ namespace ShapeEditor
         private string GetColorHex(Brush brush)
         {
             if (brush is SolidColorBrush scb)
-                return $"#{scb.Color.A:X2}{scb.Color.R:X2}{scb.Color.G:X2}{scb.Color.B}";
+                return $"#{scb.Color.A:X2}{scb.Color.R:X2}{scb.Color.G:X2}{scb.Color.B:X2}";
             return "#00FFFFFF";
         }
 
@@ -1893,9 +1888,6 @@ namespace ShapeEditor
             }
         }
 
-        // ────────────────────────────────────────────────
-        // Перетаскивание фигур и якоря (без изменений)
-        // ────────────────────────────────────────────────
 
         private void VertexAnchor_Down(object sender, MouseButtonEventArgs e)
         {
@@ -2277,7 +2269,6 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
     ClearSelection();
     RefreshShapesTree();
 }
-        // Помощники — подсветка сегмента и очистка состояния создания
         private void UpdateCustomSegmentHighlight(params int[] indices)
         {
             // Удаляем старую подсветку
@@ -2430,7 +2421,6 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                 _segmentHighlightContainer = container;
                 _currentShapeVisual.Children.Add(container);
             }
-            // Если ничего не нашли — ничего не делаем (можно добавить лог/отладку)
         }
 
         private void ApplyAngleChange(int segmentIndex, string inputText)
@@ -2624,7 +2614,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             if (_selectedVisuals.Count < 2) return;
 
             var compound = new CompoundShape();
-            compound.Id = GetNextAvailableId(); // Группа получает свободный ID
+            //compound.Id = GetNextAvailableId();
 
             // === 1. Считаем общие границы ВСЕХ фигур (с учётом вложенных) ===
             double minX = double.MaxValue, minY = double.MaxValue;
@@ -2747,7 +2737,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                 child.AnchorPoint = new Point(0, 0); // Сбрасываем для удобства на холсте
                 child.Scale *= _currentShape.Scale;
                 child.Angle += _currentShape.Angle;
-                child.Id = GetNextAvailableId(); // Каждая извлеченная фигура ищет свободный ID
+                //child.Id = GetNextAvailableId(); 
 
                 // Возвращаем на холст как независимую фигуру
                 var childVis = CreateShapeVisual(child, worldX, worldY);
@@ -2786,7 +2776,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
 
         private void DeleteMenuItem_Click(object sender, RoutedEventArgs e)
         {
-            // Удаляем всё, что было выбрано (через Ctrl или просто кликом)
+            // Удаляем всё, что было выбрано 
             var toDelete = _selectedVisuals.ToList();
             foreach (var vis in toDelete)
             {
@@ -2944,7 +2934,6 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
         {
             _treeRootItems.Clear();
 
-            // Массив можно перебирать так же, как список
             foreach (var shape in _allShapes)
             {
                 var item = new ShapeTreeItem(shape);
@@ -2961,7 +2950,6 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             ShapesTreeView.ItemsSource = null;
             ShapesTreeView.ItemsSource = _treeRootItems;
         }
-        // ======================= ПОДСВЕТКА ПРИ ВЫБОРЕ =======================
 
         private void ShapesTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
         {
@@ -2981,7 +2969,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
 
             if (shape is CompoundShape)
             {
-                ShowBoundingBox(visual);                    // подсвечиваем всю группу
+                ShowBoundingBox(visual);                   
             }
             else
             {
@@ -3127,96 +3115,180 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
         // Методы сохранения/загрузки всех фигур
         private void SaveAllShapes(string filename)
         {
-            using (var stream = new FileStream(filename, FileMode.Create, FileAccess.Write))
-            using (var writer = new BinaryWriter(stream))
+            var shapesToSave = _allShapes.Select(s => MapShapeToData(s)).ToList();
+
+            var jsonFile = new JsonShapeFile
             {
-                writer.Write(FILE_HEADER);
-                writer.Write(FILE_VERSION);
-                writer.Write(_allShapes.Length);
+                version = 1,
+                shapes = shapesToSave
+            };
 
-                for (int i = 0; i < _allShapes.Length; i++)
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            string jsonString = JsonSerializer.Serialize(jsonFile, options);
+            File.WriteAllText(filename, jsonString);
+        }
+
+        // Вспомогательный метод для рекурсивного маппинга
+        private JsonShapeData MapShapeToData(ShapeBase s)
+        {
+            var data = new JsonShapeData
+            {
+                type = s.GetType().Name,
+                id = s.Id,
+                // Получаем мировую позицию якоря
+                worldX = (s is CompoundShape || _allShapes.Contains(s)) ?
+                          s.GetAnchorWorldPosition(_allShapeVisuals[Array.IndexOf(_allShapes, s)]).X : 0,
+                worldY = (s is CompoundShape || _allShapes.Contains(s)) ?
+                          s.GetAnchorWorldPosition(_allShapeVisuals[Array.IndexOf(_allShapes, s)]).Y : 0,
+                scale = s.Scale,
+                angle = s.Angle,
+                anchorX = s.AnchorPoint.X,
+                anchorY = s.AnchorPoint.Y,
+                fill = GetColorHex(s.Fill),
+                sideColors = s.SideColors.Select(c => GetColorHex(c)).ToList(),
+                sideThicknesses = s.SideThickness.ToList(),
+                edgeLocks = s.EdgeLengthLocked.ToList(),
+                vertices = s.Vertices?.Select(v => new JsonVertex { x = v.X, y = v.Y }).ToList()
+            };
+
+            // Специфика CustomShape
+            if (s is CustomShape cs)
+            {
+                data.isClosed = cs.IsClosed;
+                data.initialDirection = cs.InitialDirection;
+                data.segments = cs.Segments.Select(seg => new JsonSegmentData
                 {
-                    var shape = _allShapes[i];
-                    var visual = _allShapeVisuals[i];
-                    Point worldAnchor = shape.GetAnchorWorldPosition(visual);
-                    writer.Write(worldAnchor.X);
-                    writer.Write(worldAnchor.Y);
-                    shape.Save(writer);
-                }
+                    name = seg.Name,
+                    length = seg.Length,
+                    thickness = seg.Thickness,
+                    angleToNext = seg.AngleToNext,
+                    angleLocked = seg.AngleLocked,
+                    lengthLocked = seg.LengthLocked,
+                    color = GetColorHex(seg.Color)
+                }).ToList();
             }
-        }// Вспомогательный метод для безопасного чтения
 
+            // Специфика CompoundShape (рекурсия)
+            if (s is CompoundShape compound)
+            {
+                data.children = compound.ChildShapes.Select(child => MapShapeToData(child)).ToList();
+            }
+
+            return data;
+        }
 
         private void LoadAllShapes(string filename)
         {
-            var fileInfo = new FileInfo(filename);
-            if (fileInfo.Length == 0)
+            string jsonString = File.ReadAllText(filename);
+            var json = JsonSerializer.Deserialize<JsonShapeFile>(jsonString);
+
+            ClearAllShapes();
+
+            foreach (var shapeData in json.shapes)
             {
-                throw new InvalidDataException("Файл пустой");
+                ShapeBase shape = RestoreShapeFromData(shapeData);
+                if (shape == null) continue;
+
+                // Создаем визуал на основе восстановленных данных
+                var visual = CreateShapeVisual(shape, shapeData.worldX, shapeData.worldY);
+                DrawCanvas.Children.Add(visual);
+                AddShapeToArray(shape, visual);
             }
 
-            using (var stream = new FileStream(filename, FileMode.Open, FileAccess.Read))
-            using (var reader = new BinaryReader(stream))
+            RefreshShapesTree();
+        }
+
+        private ShapeBase RestoreShapeFromData(JsonShapeData data)
+        {
+            ShapeBase shape = CreateShapeByType(data.type);
+            if (shape == null) return null;
+
+            // 1. Базовые свойства
+            shape.Id = data.id;
+            shape.Scale = data.scale;
+            shape.Angle = data.angle;
+            shape.AnchorPoint = new Point(data.anchorX, data.anchorY);
+            shape.Fill = ParseColor(data.fill);
+
+            if (data.sideColors != null) shape.SideColors = new List<Brush>(data.sideColors.Select(c => ParseColor(c)));
+            if (data.sideThicknesses != null) shape.SideThickness = new List<double>(data.sideThicknesses);
+            if (data.edgeLocks != null) shape.EdgeLengthLocked = new List<bool>(data.edgeLocks);
+
+            // 2. Специфика CustomShape
+            if (shape is CustomShape cs && data.segments != null)
             {
-                if (stream.Length < 10)
+                cs.IsClosed = data.isClosed;
+                cs.InitialDirection = data.initialDirection;
+                cs.Segments = data.segments.Select(sd => new LineSegment
                 {
-                    throw new InvalidDataException($"Файл слишком маленький ({stream.Length} байт)");
-                }
+                    Name = sd.name,
+                    Length = sd.length,
+                    Thickness = sd.thickness,
+                    AngleToNext = sd.angleToNext,
+                    AngleLocked = sd.angleLocked,
+                    LengthLocked = sd.lengthLocked,
+                    Color = ParseColor(sd.color)
+                }).ToList();
 
-                string header = reader.ReadString();
-                if (header != FILE_HEADER)
-                    throw new InvalidDataException("Неверный формат файла");
+                // Пересчитываем точки (в CustomShape.cs этот метод должен быть public или вызываться через Reflection)
+                cs.GetType().GetMethod("RebuildVertices", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                          ?.Invoke(cs, null);
+            }
 
-                int version = reader.ReadInt32();
-                if (version != FILE_VERSION)
-                    throw new NotSupportedException($"Неподдерживаемая версия формата: {version}");
-
-                int shapeCount = reader.ReadInt32();
-                ClearAllShapes();
-
-                // Сначала загружаем все фигуры во временный список
-                var loadedShapes = new List<(ShapeBase shape, double worldX, double worldY)>();
-
-                for (int i = 0; i < shapeCount; i++)
+            // 3. Специфика CompoundShape (Рекурсия)
+            if (shape is CompoundShape compound && data.children != null)
+            {
+                foreach (var childData in data.children)
                 {
-                    double worldX = reader.ReadDouble();
-                    double worldY = reader.ReadDouble();
-
-                    int typeNameLength = reader.ReadInt32();
-                    string typeName = new string(reader.ReadChars(typeNameLength));
-
-                    ShapeBase shape = CreateShapeByType(typeName);
-                    if (shape == null)
-                    {
-                        SkipShapeData(reader);
-                        continue;
-                    }
-
-                    shape.Load(reader);
-                    loadedShapes.Add((shape, worldX, worldY));
+                    var child = RestoreShapeFromData(childData);
+                    if (child != null)
+                        compound.AddChildShape(child);
                 }
+                // ВАЖНО: После добавления всех детей заставляем группу вычислить свои MinX/MaxX
+                compound.RecalculateBounds();
+            }
 
-                // Теперь создаем визуалы и добавляем на холст
-                // Для составных фигур сначала нужно построить детей, чтобы вычислились их границы
-                foreach (var (shape, worldX, worldY) in loadedShapes)
+            // 4. Обычные фигуры (Прямоугольники, Треугольники и т.д.)
+            if (data.vertices != null && data.vertices.Count > 0)
+            {
+                shape.Vertices = data.vertices.Select(v => new Point(v.x, v.y)).ToArray();
+                // Принудительно вызываем метод обновления MinX/MaxX, который обычно в ShapeBase
+                // Если в ShapeBase нет публичного метода для этого, можно вызвать Build(0,0) без добавления на холст
+                shape.Build(0, 0);
+            }
+
+            return shape;
+        }
+
+        private void LoadShapeFromJson(ShapeBase shape, JsonShapeData data)
+        {
+            // Рекурсивная загрузка для детей составной фигуры
+            if (shape is CompoundShape compound && data.children != null)
+            {
+                foreach (var childData in data.children)
                 {
-                    // Для составной фигуры сначала строим всех детей в "холостом" режиме
-                    // чтобы у них вычислились MinX, MinY, MaxX, MaxY
-                    if (shape is CompoundShape compound)
-                    {
-                        PreBuildCompoundChildren(compound);
-                    }
-
-                    var visual = CreateShapeVisual(shape, worldX, worldY);
-                    DrawCanvas.Children.Add(visual);
-                    AddShapeToArray(shape, visual);
+                    ShapeBase child = CreateShapeByType(childData.type);
+                    LoadShapeFromJson(child, childData);
+                    compound.AddChildShape(child);
                 }
-
-                RefreshShapesTree();
-                ClearSelection();
             }
         }
 
+        private Brush ParseColor(string hex)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(hex)) return Brushes.Black;
+
+                // Используем стандартный конвертер WPF, он защищен от ошибок длины строки
+                var color = (Color)ColorConverter.ConvertFromString(hex);
+                return new SolidColorBrush(color);
+            }
+            catch
+            {
+                return Brushes.Black; // Возвращаем черный в случае ошибки формата
+            }
+        }
         /// <summary>
         /// Предварительно строит детей составной фигуры, чтобы вычислились их границы
         /// </summary>
@@ -3297,6 +3369,66 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
 
             RefreshShapesTree();
             UpdateParamsPanelVisibility();
+        }
+
+        public static bool IsHighlightedChild(CompoundShape parent, ShapeBase child)
+        {
+            var main = (MainWindow)Application.Current.MainWindow;
+            // Проверяем, выделен ли этот ребенок в TreeView прямо сейчас
+            if (main.ShapesTreeView.SelectedItem is ShapeTreeItem item)
+            {
+                return ReferenceEquals(item.Shape, child) &&
+                       main._editingParentCompound == parent;
+            }
+            return false;
+        }
+
+        public class JsonShapeFile
+        {
+            public int version { get; set; }
+            public List<JsonShapeData> shapes { get; set; }
+        }
+
+        public class JsonShapeData
+        {
+            public string type { get; set; }
+            public int id { get; set; }
+            public double worldX { get; set; }
+            public double worldY { get; set; }
+            public double scale { get; set; }
+            public double angle { get; set; }
+            public double anchorX { get; set; }
+            public double anchorY { get; set; }
+            public string fill { get; set; }
+            public List<string> sideColors { get; set; }
+            public List<double> sideThicknesses { get; set; }
+            public List<bool> edgeLocks { get; set; }
+            public List<JsonVertex> vertices { get; set; }
+
+            // Новые поля для CustomShape
+            public bool isClosed { get; set; }
+            public double initialDirection { get; set; }
+            public List<JsonSegmentData> segments { get; set; }
+
+            // Для CompoundShape
+            public List<JsonShapeData> children { get; set; }
+        }
+
+        public class JsonSegmentData
+        {
+            public string name { get; set; }
+            public double length { get; set; }
+            public string color { get; set; }
+            public double thickness { get; set; }
+            public double angleToNext { get; set; }
+            public bool angleLocked { get; set; }
+            public bool lengthLocked { get; set; }
+        }
+
+        public class JsonVertex
+        {
+            public double x { get; set; }
+            public double y { get; set; }
         }
 
 
