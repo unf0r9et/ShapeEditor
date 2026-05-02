@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using ShapeEditor.shapes;
+using System.Windows;
 
 namespace ShapeEditor
 {

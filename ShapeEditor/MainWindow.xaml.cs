@@ -11,7 +11,8 @@ using System.IO;
 using System.Reflection;
 using Microsoft.Win32;
 using System.Text.Json;           
-using System.Globalization;   
+using System.Globalization;
+using ShapeEditor.shapes;
 
 namespace ShapeEditor
 {

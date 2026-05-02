@@ -6,7 +6,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.IO;
 
-namespace ShapeEditor
+namespace ShapeEditor.shapes
 {
     public abstract class ShapeBase
     {
@@ -163,13 +163,13 @@ namespace ShapeEditor
         }
 
         // Алгоритм определения принадлежности точки полигону (ray casting)
-        private bool PointInPolygon(Point p, Point[] polygon)
+        public bool PointInPolygon(Point p, Point[] polygon)
         {
             bool inside = false;
             for (int i = 0, j = polygon.Length - 1; i < polygon.Length; j = i, i++)
             {
-                if (((polygon[i].Y > p.Y) != (polygon[j].Y > p.Y)) &&
-                    (p.X < (polygon[j].X - polygon[i].X) * (p.Y - polygon[i].Y) / (polygon[j].Y - polygon[i].Y) + polygon[i].X))
+                if (polygon[i].Y > p.Y != polygon[j].Y > p.Y &&
+                    p.X < (polygon[j].X - polygon[i].X) * (p.Y - polygon[i].Y) / (polygon[j].Y - polygon[i].Y) + polygon[i].X)
                 {
                     inside = !inside;
                 }
@@ -200,7 +200,7 @@ namespace ShapeEditor
             {
                 double val = (q.Y - p.Y) * (r.X - q.X) - (q.X - p.X) * (r.Y - q.Y);
                 if (Math.Abs(val) < 1e-9) return 0;
-                return (val > 0) ? 1 : 2;
+                return val > 0 ? 1 : 2;
             }
 
             int o1 = Orientation(a1, a2, b1);

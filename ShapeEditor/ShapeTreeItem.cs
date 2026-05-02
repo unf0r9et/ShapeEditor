@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using ShapeEditor.shapes;
+using System.Collections.Generic;
 
 namespace ShapeEditor
 {

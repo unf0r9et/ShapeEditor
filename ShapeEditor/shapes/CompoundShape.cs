@@ -7,7 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
-namespace ShapeEditor
+namespace ShapeEditor.shapes
 {
     public class CompoundShape : ShapeBase
     {
@@ -207,7 +207,7 @@ namespace ShapeEditor
 
                 foreach (var sub in childVisual.Children.OfType<Ellipse>().Where(e => e.Tag?.ToString() == "Anchor"))
                 {
-                    sub.Visibility = (isEditingThis || isHighlightedFromTree) ? Visibility.Visible : Visibility.Collapsed;
+                    sub.Visibility = isEditingThis || isHighlightedFromTree ? Visibility.Visible : Visibility.Collapsed;
                 }
                 foreach (var sub in childVisual.Children.OfType<Ellipse>().Where(e => e.Tag?.ToString() == "Anchor"))
                     sub.Visibility = isEditingThis ? Visibility.Visible : Visibility.Collapsed;
