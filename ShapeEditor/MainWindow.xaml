@@ -17,20 +17,6 @@
         </Grid.ColumnDefinitions>
 
         <!-- Кнопка закрытия в правом верхнем углу холста -->
-        <Button Grid.Column="1"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Top"
-                Margin="12"
-                Width="36"
-                Height="36"
-                Click="CloseButton_Click"
-                ToolTip="Закрыть приложение"
-                Style="{StaticResource MaterialDesignFlatButton}">
-            <materialDesign:PackIcon Kind="Close" 
-                                     Width="20" 
-                                     Height="20"
-                                     Foreground="{DynamicResource MaterialDesignBody}" />
-        </Button>
 
         <!-- Левая панель управления -->
         <Border Grid.Column="0"
@@ -45,7 +31,7 @@
                         Background="{DynamicResource PrimaryHueMidBrush}"
 
                         Padding="0,15,0,15">
-                    
+
                     <TextBlock Text="ФИГУРЫ"
                                FontSize="24"
                                Foreground="Black"
@@ -103,6 +89,18 @@
                                 BorderBrush="{DynamicResource PrimaryHueMidBrush}"
                                 Foreground="{DynamicResource PrimaryHueMidBrush}"
                                 Margin="0,6"
+                                Background="Lavender" 
+                                Height="42"
+                                Click="AddEllipse">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <TextBlock Text="Эллипс" VerticalAlignment="Center" FontSize="16"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource MaterialDesignOutlinedButton}"
+                                BorderBrush="{DynamicResource PrimaryHueMidBrush}"
+                                Foreground="{DynamicResource PrimaryHueMidBrush}"
+                                Margin="0,6"
                                 Height="42"
                                                                 Background="Lavender" 
 
@@ -123,9 +121,42 @@
                                 <TextBlock Text="Шестиугольник" VerticalAlignment="Center" FontSize="16"/>
                             </StackPanel>
                         </Button>
+
+                        <Button Style="{StaticResource MaterialDesignOutlinedButton}"
+                                BorderBrush="{DynamicResource PrimaryHueMidBrush}"
+                                Foreground="{DynamicResource PrimaryHueMidBrush}"
+                                Margin="0,6"
+                                Background="Lavender"
+                                Height="42"
+                                Click="AddCustomShape">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <TextBlock Text="Кастомная фигура" VerticalAlignment="Center" FontSize="16"/>
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
                 </ScrollViewer>
+                <!-- === СПИСОК ФИГУР (выпадающий) === -->
+                <Expander DockPanel.Dock="Top"
+          Header="Список фигур на холсте"
+          Margin="12,16,12,8"
+          Background="White"
+          BorderBrush="#DDDDDD"
+          BorderThickness="1"
+          IsExpanded="True">
 
+                    <TreeView x:Name="ShapesTreeView"
+              BorderThickness="0"
+              SelectedItemChanged="ShapesTreeView_SelectedItemChanged"
+              Height="280">
+                        <TreeView.ItemTemplate>
+                            <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                <TextBlock Text="{Binding DisplayText}" 
+                           Padding="6,4" 
+                           FontSize="13"/>
+                            </HierarchicalDataTemplate>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
+                </Expander>
                 <!-- Настройки внизу панели -->
                 <!-- Внутри DockPanel, после ScrollViewer с кнопками фигур -->
                 <Border x:Name="ParamsContainer"
@@ -151,18 +182,90 @@
 
         <!-- Холст для рисования -->
         <Canvas x:Name="DrawCanvas" 
-                Grid.Column="1" 
-                Background="White"
-                ClipToBounds="True">
+        Grid.Column="1" 
+        Background="White"
+        ClipToBounds="True"
+        ContextMenuOpening="DrawCanvas_ContextMenuOpening">
+            <!-- Добавили событие открытия меню -->
             <Canvas.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="Прямоугольник" Click="AddRectangle" />
-                    <MenuItem Header="Треугольник" Click="AddTriangle" />
-                    <MenuItem Header="Трапеция" Click="AddTrapezoid" />
-                    <MenuItem Header="Окружность" Click="AddCircle" />
-                    <MenuItem Header="Шестиугольник" Click="AddHexagon" />
+                <ContextMenu x:Name="MainContextMenu">
+
+                    <!-- Файл -->
+                    <MenuItem Header="Файл">
+                        <MenuItem Header="Сохранить..." Click="SaveMenuItem_Click">
+                            <MenuItem.Icon>
+                                <materialDesign:PackIcon Kind="ContentSave" Width="20" Height="20"/>
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="Открыть..." Click="LoadMenuItem_Click">
+                            <MenuItem.Icon>
+                                <materialDesign:PackIcon Kind="FolderOpen" Width="20" Height="20"/>
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <Separator/>
+                        <MenuItem Header="Очистить холст" Click="ClearCanvasMenuItem_Click" Foreground="DarkRed">
+                            <MenuItem.Icon>
+                                <materialDesign:PackIcon Kind="DeleteSweep" Width="20" Height="20" Foreground="DarkRed"/>
+                            </MenuItem.Icon>
+                        </MenuItem>
+                    </MenuItem>
+                    <MenuItem Header="Фигура">
+                        <MenuItem Header="Сохранить фигуру в файл..." Click="SaveShapeToFile"/>
+                        <MenuItem Header="Загрузить фигуру из файла..." Click="LoadShapeFromFile"/>
+                    </MenuItem>
+
+                    <Separator/>
+
+                    <!-- Сгруппировать -->
+                    <MenuItem x:Name="GroupMenu" Header="Сгруппировать" Click="GroupMenuItem_Click">
+                        <MenuItem.Icon>
+                            <materialDesign:PackIcon Kind="Group" />
+                            <!-- Заменили VectorCombine на Group -->
+                        </MenuItem.Icon>
+                    </MenuItem>
+
+                    <!-- Разгруппировать -->
+                    <MenuItem x:Name="UngroupMenu" Header="Разгруппировать" Click="UngroupMenuItem_Click">
+                        <MenuItem.Icon>
+                            <materialDesign:PackIcon Kind="Ungroup" />
+                            <!-- Заменили VectorDecombine на Ungroup -->
+                        </MenuItem.Icon>
+                    </MenuItem>
+
+                    <Separator />
+
+                    <!-- Добавить фигуру -->
+                    <MenuItem Header="Добавить фигуру">
+                        <MenuItem Header="Прямоугольник" Click="AddRectangle" />
+                        <MenuItem Header="Треугольник" Click="AddTriangle" />
+                        <MenuItem Header="Трапеция" Click="AddTrapezoid" />
+                        <MenuItem Header="Окружность" Click="AddCircle" />
+                        <MenuItem Header="Шестиугольник" Click="AddHexagon" />
+                    </MenuItem>
+
+                    <Separator />
+
+                    <!-- Удалить -->
+                    <MenuItem Header="Удалить выбранное" Click="DeleteMenuItem_Click" Foreground="Red">
+                        <materialDesign:PackIcon Kind="Delete" Foreground="Red" />
+                    </MenuItem>
                 </ContextMenu>
             </Canvas.ContextMenu>
         </Canvas>
+        <Button
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="0,10,346,0"
+                Width="64"
+                Height="26"
+                Background="Lavender"
+                Click="CloseButton_Click"
+                ToolTip="Закрыть приложение"
+                Style="{StaticResource MaterialDesignFlatButton}">
+            <materialDesign:PackIcon Kind="Close" 
+                                     Width="20" 
+                                     Height="20"
+                                     Foreground="{DynamicResource MaterialDesignBody}" />
+        </Button>
     </Grid>
 </Window>
