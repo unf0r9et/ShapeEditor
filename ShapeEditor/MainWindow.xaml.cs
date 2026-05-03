@@ -12,7 +12,7 @@ using System.Reflection;
 using Microsoft.Win32;
 using System.Text.Json;           
 using System.Globalization;
-using ShapeEditor.shapes;
+using ShapeEditor;
 
 namespace ShapeEditor
 {
@@ -112,6 +112,63 @@ namespace ShapeEditor
         private const string FILE_FILTER = "JSON файлы (*.json)|*.json|Все файлы (*.*)|*.*";
         // private const string FILE_HEADER = "SHAPEEDITOR";
         private const int FILE_VERSION = 1;
+
+
+
+
+
+
+        // НОВЫЕ ПОЛЯ (добавить в начало класса MainWindow)
+        // --- Для эллипса: перетаскивание фокусов ---
+        //private bool _draggingFocus = false;
+        //private string _draggedFocusName = null; // "Focus1" или "Focus2"
+        //private Point _focusDragStartMouse;
+        //private Point _focusDragOriginalF1;
+        //private Point _focusDragOriginalF2;
+
+        // --- Для сохранения/загрузки отдельной фигуры ---
+        private const string SHAPE_FILE_FILTER = "JSON фигура (*.shape.json)|*.shape.json|Все файлы (*.*)|*.*";
+
+        // --- ОБНОВЛЁННЫЕ МЕТОДЫ ДОБАВЛЕНИЯ ФИГУР ---
+
+        private void AddRectangle(object sender, RoutedEventArgs e) =>
+            AddShape(PolygonShape.CreateRectangle());
+
+        private void AddTriangle(object sender, RoutedEventArgs e) =>
+            AddShape(PolygonShape.CreateTriangle());
+
+        private void AddTrapezoid(object sender, RoutedEventArgs e) =>
+            AddShape(PolygonShape.CreateTrapezoid());
+
+        private void AddHexagon(object sender, RoutedEventArgs e) =>
+            AddShape(PolygonShape.CreateHexagon());
+
+        private void AddCircle(object sender, RoutedEventArgs e)
+        {
+            var circle = new EllipseShape { IsCircle = true, MajorAxis = 100 };
+            AddShape(circle);
+        }
+
+        private void AddEllipse(object sender, RoutedEventArgs e)
+        {
+            var ellipse = new EllipseShape
+            {
+                IsCircle = false,
+                MajorAxis = 120,
+                MinorAxis = 80,
+                FocalDistance = 40
+            };
+            AddShape(ellipse);
+        }
+
+
+
+
+
+
+
+
+
         public MainWindow()
         {
             InitializeComponent();
@@ -152,11 +209,11 @@ namespace ShapeEditor
                              canvasTop + scaledY - minY);
         }
 
-        private void AddRectangle(object sender, RoutedEventArgs e) => AddShape(new RectangleShape());
-        private void AddTriangle(object sender, RoutedEventArgs e) => AddShape(new TriangleShape());
-        private void AddTrapezoid(object sender, RoutedEventArgs e) => AddShape(new TrapezoidShape());
-        private void AddCircle(object sender, RoutedEventArgs e) => AddShape(new CircleShape());
-        private void AddHexagon(object sender, RoutedEventArgs e) => AddShape(new HexagonShape());
+        //private void AddRectangle(object sender, RoutedEventArgs e) => AddShape(new RectangleShape());
+        //private void AddTriangle(object sender, RoutedEventArgs e) => AddShape(new TriangleShape());
+        //private void AddTrapezoid(object sender, RoutedEventArgs e) => AddShape(new TrapezoidShape());
+        //private void AddCircle(object sender, RoutedEventArgs e) => AddShape(new CircleShape());
+        //private void AddHexagon(object sender, RoutedEventArgs e) => AddShape(new HexagonShape());
         private void AddCustomShape(object sender, RoutedEventArgs e)
         {
             // Начинаем интерактивное создание кастомной фигуры
@@ -352,8 +409,23 @@ namespace ShapeEditor
                 }
             }
 
+            //// === ОБРАБОТЧИКИ ДЛЯ ФОКУСОВ ЭЛЛИПСА ===
+            //if (shape is EllipseShape ellipseShape && !ellipseShape.IsCircle)
+            //{
+            //    foreach (UIElement child in canvas.Children)
+            //    {
+            //        if (child is Ellipse ellipse && ellipse.Tag?.ToString()?.StartsWith("Focus") == true)
+            //        {
+            //            ellipse.MouseLeftButtonDown += Focus_Down;
+            //            ellipse.MouseMove += Focus_Move;
+            //            ellipse.MouseLeftButtonUp += Focus_Up;
+            //        }
+            //    }
+            //}
+
             return canvas;
         }
+
 
         private void RedrawPreservingAnchor()
         {
@@ -455,6 +527,52 @@ namespace ShapeEditor
             if (_scaleTextBox != null) _scaleTextBox.Text = _currentShape.Scale.ToString("0.00");
             if (_angleSlider != null) _angleSlider.Value = _currentShape.Angle;
             if (_angleTextBox != null) _angleTextBox.Text = ((int)_currentShape.Angle).ToString();
+
+            // Обновление параметров эллипса
+            if (_currentShape is EllipseShape ellipse)
+            {
+                // Находим TextBox напрямую по Tag, без перебора StackPanel
+                foreach (var tb in FindTextBoxesByTag(_paramsStackPanel,
+                    "MajorAxis", "MinorAxis", "FocalDistance", "FocusOffsetX",
+                    "GlobalFocus1X", "GlobalFocus1Y", "GlobalFocus2X", "GlobalFocus2Y"))
+                {
+                    if (tb.IsKeyboardFocused) continue; // Не трогаем то, что редактирует пользователь
+
+                    string tag = tb.Tag?.ToString();
+                    switch (tag)
+                    {
+                        case "MajorAxis":
+                            tb.Text = ellipse.MajorAxis.ToString("0.0");
+                            break;
+                        case "MinorAxis":
+                            tb.Text = ellipse.MinorAxis.ToString("0.0");
+                            break;
+                        case "FocalDistance":
+                            tb.Text = ellipse.FocalDistance.ToString("0.0");
+                            break;
+                        case "FocusOffsetX":
+                            tb.Text = ellipse.FocusOffset.ToString("0.0");
+                            break;
+                        case "GlobalFocus1X":
+                        case "GlobalFocus1Y":
+                        case "GlobalFocus2X":
+                        case "GlobalFocus2Y":
+                            {
+                                Point worldAnchor = ellipse.GetAnchorWorldPosition(_currentShapeVisual);
+                                var (f1, f2) = ellipse.GetGlobalFocusPositions(worldAnchor.X, worldAnchor.Y);
+                                tb.Text = tag switch
+                                {
+                                    "GlobalFocus1X" => f1.X.ToString("0"),
+                                    "GlobalFocus1Y" => f1.Y.ToString("0"),
+                                    "GlobalFocus2X" => f2.X.ToString("0"),
+                                    "GlobalFocus2Y" => f2.Y.ToString("0"),
+                                    _ => tb.Text
+                                };
+                            }
+                            break;
+                    }
+                }
+            }
 
             // Локальный якорь
             if (_localAnchorXBox != null) _localAnchorXBox.Text = _currentShape.AnchorPoint.X.ToString("0");
@@ -624,8 +742,7 @@ namespace ShapeEditor
             _vertexWorldXBoxes.Clear(); // ← важно!
             _vertexWorldYBoxes.Clear(); // ← важно!
 
-            bool isCircle = _currentShape is CircleShape;
-            int sides = _currentShape.SidesCount;
+            bool isCircle = _currentShape is EllipseShape ellipseCheck && ellipseCheck.IsCircle; int sides = _currentShape.SidesCount;
             string[] names = _currentShape.SideNames ?? Array.Empty<string>();
 
             // prepare pending lengths
@@ -710,6 +827,211 @@ namespace ShapeEditor
                 row.Children.Add(thickTb);
 
                 _paramsStackPanel.Children.Add(row);
+            }
+
+            // === СЕКЦИЯ ПАРАМЕТРОВ ЭЛЛИПСА ===
+            if (_currentShape is EllipseShape ellipse)
+            {
+                _paramsStackPanel.Children.Add(new TextBlock
+                {
+                    Text = ellipse.IsCircle ? "Параметры круга:" : "Параметры эллипса:",
+                    FontWeight = FontWeights.Bold,
+                    Margin = new Thickness(0, 8, 0, 6)
+                });
+
+                // Большая полуось (MajorAxis)
+                var majorRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
+                majorRow.Children.Add(new TextBlock
+                {
+                    Text = ellipse.FociOnYAxis ? "Малая ось (гориз.):" : "Большая ось:",
+                    Width = 110,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                var majorTb = new TextBox
+                {
+                    Width = 70,
+                    Text = ellipse.MajorAxis.ToString("0.0"),
+                    Tag = "MajorAxis"
+                };
+                majorTb.LostFocus += (s, ev) =>
+                {
+                    if (double.TryParse(majorTb.Text, out double v) && v > 0)
+                    {
+                        ellipse.MajorAxis = v;
+                        RedrawPreservingAnchor();
+                        RefreshParamsPanelValues();
+                    }
+                };
+                majorTb.KeyDown += (s, ev) =>
+                {
+                    if (ev.Key == Key.Enter)
+                    {
+                        if (double.TryParse(majorTb.Text, out double v) && v > 0)
+                        {
+                            ellipse.MajorAxis = v;
+                            RedrawPreservingAnchor();
+                            RefreshParamsPanelValues();
+                        }
+                        ev.Handled = true;
+                    }
+                };
+                majorRow.Children.Add(majorTb);
+                _paramsStackPanel.Children.Add(majorRow);
+
+                // Малая полуось (MinorAxis)
+                var minorRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
+                minorRow.Children.Add(new TextBlock
+                {
+                    Text = ellipse.FociOnYAxis ? "Большая ось (верт.):" : "Малая ось:",
+                    Width = 110,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                var minorTb = new TextBox
+                {
+                    Width = 70,
+                    Text = ellipse.MinorAxis.ToString("0.0"),
+                    Tag = "MinorAxis"
+                };
+                minorTb.LostFocus += (s, ev) =>
+                {
+                    if (double.TryParse(minorTb.Text, out double v) && v > 0)
+                    {
+                        ellipse.MinorAxis = v;
+                        ellipse.UpdateFociFromParameters();
+                        RedrawPreservingAnchor();
+                        RefreshParamsPanelValues();
+                    }
+                };
+                minorTb.KeyDown += (s, ev) =>
+                {
+                    if (ev.Key == Key.Enter)
+                    {
+                        if (double.TryParse(minorTb.Text, out double v) && v > 0)
+                        {
+                            ellipse.MinorAxis = v;
+                            ellipse.UpdateFociFromParameters();
+                            RedrawPreservingAnchor();
+                            RefreshParamsPanelValues();
+                        }
+                        ev.Handled = true;
+                    }
+                };
+                minorRow.Children.Add(minorTb);
+                _paramsStackPanel.Children.Add(minorRow);
+
+                // Фокусное расстояние (c) — доступно всегда, даже для круга
+                var focalRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
+                focalRow.Children.Add(new TextBlock
+                {
+                    Text = ellipse.FociOnYAxis ? "Фокус (c, по Y):" : "Фокус (c, по X):",
+                    Width = 110,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                var focalTb = new TextBox
+                {
+                    Width = 70,
+                    Text = ellipse.FocalDistance.ToString("0.0"),
+                    Tag = "FocalDistance"
+                };
+                focalTb.LostFocus += (s, ev) =>
+                {
+                    if (double.TryParse(focalTb.Text, out double v) && v >= 0)
+                    {
+                        ellipse.IsCircle = false; // Сбрасываем флаг круга
+                        ellipse.FocalDistance = v;
+                        if (Math.Abs(v) < 1e-6)
+                        {
+                            ellipse.IsCircle = true;
+                            ellipse.MinorAxis = ellipse.MajorAxis;
+                            ellipse.FocalDistance = 0;
+                            ellipse.FocusOffset = 0;
+                        }
+                        RedrawPreservingAnchor();
+                        RefreshParamsPanelValues();
+                    }
+                };
+                focalTb.KeyDown += (s, ev) =>
+                {
+                    if (ev.Key == Key.Enter)
+                    {
+                        if (double.TryParse(focalTb.Text, out double v) && v >= 0)
+                        {
+                            ellipse.IsCircle = false;
+                            ellipse.FocalDistance = v;
+                            if (Math.Abs(v) < 1e-6)
+                            {
+                                ellipse.IsCircle = true;
+                                ellipse.MinorAxis = ellipse.MajorAxis;
+                                ellipse.FocalDistance = 0;
+                                ellipse.FocusOffset = 0;
+                            }
+                            RedrawPreservingAnchor();
+                            RefreshParamsPanelValues();
+                        }
+                        ev.Handled = true;
+                    }
+                };
+                focalRow.Children.Add(focalTb);
+                _paramsStackPanel.Children.Add(focalRow);
+
+                // Глобальные координаты фокусов (только чтение)
+                if (!ellipse.IsCircle)
+                {
+                    Point worldAnchor = ellipse.GetAnchorWorldPosition(_currentShapeVisual);
+                    var (f1, f2) = ellipse.GetGlobalFocusPositions(worldAnchor.X, worldAnchor.Y);
+
+                    var globalF1Row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 2) };
+                    globalF1Row.Children.Add(new TextBlock
+                    {
+                        Text = "Фокус 1 (глоб.):",
+                        Width = 110,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Foreground = Brushes.Gray
+                    });
+                    var gf1x = new TextBox { Width = 55, Text = f1.X.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "GlobalFocus1X" };
+                    var gf1y = new TextBox { Width = 55, Text = f1.Y.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "GlobalFocus1Y" };
+                    globalF1Row.Children.Add(gf1x);
+                    globalF1Row.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray });
+                    globalF1Row.Children.Add(gf1y);
+                    _paramsStackPanel.Children.Add(globalF1Row);
+
+                    var globalF2Row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 4) };
+                    globalF2Row.Children.Add(new TextBlock
+                    {
+                        Text = "Фокус 2 (глоб.):",
+                        Width = 110,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Foreground = Brushes.Gray
+                    });
+                    var gf2x = new TextBox { Width = 55, Text = f2.X.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "GlobalFocus2X" };
+                    var gf2y = new TextBox { Width = 55, Text = f2.Y.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "GlobalFocus2Y" };
+                    globalF2Row.Children.Add(gf2x);
+                    globalF2Row.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray });
+                    globalF2Row.Children.Add(gf2y);
+                    _paramsStackPanel.Children.Add(globalF2Row);
+                }
+                else
+                {
+                    // Для круга — показываем глобальные координаты центра
+                    var center = ellipse.GetAnchorWorldPosition(_currentShapeVisual);
+                    var globalFRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
+                    globalFRow.Children.Add(new TextBlock
+                    {
+                        Text = "Центр (глоб.):",
+                        Width = 110,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Foreground = Brushes.Gray
+                    });
+                    var gcx = new TextBox { Width = 55, Text = center.X.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray };
+                    var gcy = new TextBox { Width = 55, Text = center.Y.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray };
+                    globalFRow.Children.Add(gcx);
+                    globalFRow.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray });
+                    globalFRow.Children.Add(gcy);
+                    _paramsStackPanel.Children.Add(globalFRow);
+                }
+
+                // Разделитель
+                _paramsStackPanel.Children.Add(new Separator { Margin = new Thickness(0, 8, 0, 8) });
             }
 
             // Для кастомных фигур — добавляем углы между отрезками
@@ -1098,13 +1420,13 @@ namespace ShapeEditor
                 }
 
                 // Чекбокс "Равнобедренная трапеция" только для трапеции
-                if (_currentShape is TrapezoidShape trapezoid)
+                if (_currentShape is PolygonShape polyTrap && polyTrap.PolygonType == "Trapezoid")
                 {
                     var isoscelesCbRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 6) };
                     _isoscelesCheckBox = new CheckBox
                     {
                         Content = "Равнобедренная трапеция",
-                        IsChecked = trapezoid.EnforceIsosceles,
+                        IsChecked = polyTrap.EnforceIsosceles,
                         VerticalAlignment = VerticalAlignment.Center,
                         Margin = new Thickness(110, 0, 0, 0),
                         FontWeight = FontWeights.Bold
@@ -1115,7 +1437,7 @@ namespace ShapeEditor
                     _paramsStackPanel.Children.Add(isoscelesCbRow);
 
                     // Если установлено, синхронизируем значения сразу в UI (правая -> левая по умолчанию)
-                    if (trapezoid.EnforceIsosceles)
+                    if (polyTrap.EnforceIsosceles)
                     {
                         SyncIsoscelesTextboxesFromUI();
                     }
@@ -1552,7 +1874,7 @@ namespace ShapeEditor
                 _pendingEdgeLengths[edgeIndex] = v; // сохраняем как число (целое в double)
 
                 // Если это трапеция и включена равнобедренность — синхронизируем парную сторону (1 <-> 3)
-                if (_currentShape is TrapezoidShape trap && trap.EnforceIsosceles && (edgeIndex == 1 || edgeIndex == 3))
+                if (_currentShape is PolygonShape polyTrap2 && polyTrap2.PolygonType == "Trapezoid" && polyTrap2.EnforceIsosceles && (edgeIndex == 1 || edgeIndex == 3))
                 {
                     int partner = edgeIndex == 1 ? 3 : 1;
                     bool partnerLocked = (partner < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[partner];
@@ -1607,7 +1929,8 @@ namespace ShapeEditor
             if (locked) return;
 
             // For Triangle and Trapezoid: always try atomic application using TrySetEdgeLengths
-            if (_currentShape is TriangleShape || _currentShape is TrapezoidShape)
+            if ((_currentShape is PolygonShape polyTri && polyTri.PolygonType == "Triangle") ||
+                            (_currentShape is PolygonShape polyTrap3 && polyTrap3.PolygonType == "Trapezoid"))
             {
                 double[] lengths = new double[_currentShape.Vertices.Length];
                 for (int i = 0; i < lengths.Length; i++) lengths[i] = _currentShape.GetEdgeLength(i);
@@ -1623,7 +1946,7 @@ namespace ShapeEditor
                     lengths[edgeIndex] = value;
 
                 // Если трапеция и включена равнобедренность — зеркалим при возможности
-                if (_currentShape is TrapezoidShape trap && trap.EnforceIsosceles)
+                if (_currentShape is PolygonShape polyTrap4 && polyTrap4.PolygonType == "Trapezoid" && polyTrap4.EnforceIsosceles)
                 {
                     int partner = (edgeIndex == 1) ? 3 : (edgeIndex == 3 ? 1 : -1);
                     if (partner >= 0)
@@ -1670,7 +1993,7 @@ namespace ShapeEditor
             }
 
             // If trapezoid with enforce isosceles, mirror sides
-            if (_currentShape is TrapezoidShape trap && trap.EnforceIsosceles)
+            if (_currentShape is PolygonShape polyTrap5 && polyTrap5.PolygonType == "Trapezoid" && polyTrap5.EnforceIsosceles)
             {
                 // prefer right side value if present, otherwise left
                 int rightIdx = 1, leftIdx = 3;
@@ -1693,7 +2016,7 @@ namespace ShapeEditor
             }
 
             // Если фигура поддерживает атомарное применение (треугольник/трапеция) — попробуем TrySetEdgeLengths
-            if (_currentShape is TriangleShape || _currentShape is TrapezoidShape)
+            if (_currentShape is PolygonShape polyTri && polyTri.PolygonType == "Triangle" || _currentShape is PolygonShape polyTrap11 && polyTrap11.PolygonType == "Trapezoid")
             {
                 if (!_currentShape.TrySetEdgeLengths(lengths))
                 {
@@ -1727,9 +2050,8 @@ namespace ShapeEditor
 
         private void IsoscelesCheckChanged(object? sender, RoutedEventArgs e)
         {
-            if (!(_currentShape is TrapezoidShape trap)) return;
-            bool isChecked = _isoscelesCheckBox?.IsChecked == true;
-            trap.EnforceIsosceles = isChecked;
+            if (!(_currentShape is PolygonShape polyTrap8 && polyTrap8.PolygonType == "Trapezoid")) return; bool isChecked = _isoscelesCheckBox?.IsChecked == true;
+            polyTrap8.EnforceIsosceles = isChecked;
 
             // При включении — синхронизируем значения боковых сторон в UI (при условии, что сторона не заблокирована)
             if (isChecked)
@@ -1741,7 +2063,7 @@ namespace ShapeEditor
         private void SyncIsoscelesTextboxesFromUI()
         {
             if (_edgeLengthBoxes == null || _edgeLengthBoxes.Count < 4) return;
-            if (!(_currentShape is TrapezoidShape)) return;
+            if (!(_currentShape is PolygonShape polyTrap9 && polyTrap9.PolygonType == "Trapezoid")) return;
 
             int rightIdx = 1, leftIdx = 3;
             bool leftLocked = (leftIdx < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[leftIdx];
@@ -2473,12 +2795,12 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
         {
             ShapeBase newShape = type switch
             {
-                "Прямоугольник" => new RectangleShape(),
-                "Треугольник" => new TriangleShape(),
-                "Трапеция" => new TrapezoidShape(),
-                "Круг" => new CircleShape(),
-                "Шестиугольник" => new HexagonShape(),
-                _ => new RectangleShape()
+                "Прямоугольник" => PolygonShape.CreateRectangle(),
+                "Треугольник" => PolygonShape.CreateTriangle(),
+                "Трапеция" => PolygonShape.CreateTrapezoid(),
+                "Круг" => new EllipseShape { IsCircle = true, MajorAxis = 100 },
+                "Шестиугольник" => PolygonShape.CreateHexagon(),
+                _ => PolygonShape.CreateRectangle()
             };
 
             // Настройка базовых свойств
@@ -2610,14 +2932,15 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             }
         }
 
+        // ==================== ГРУППИРОВКА / РАЗГРУППИРОВКА ====================
+
         private void GroupSelected()
         {
             if (_selectedVisuals.Count < 2) return;
 
             var compound = new CompoundShape();
-            //compound.Id = GetNextAvailableId();
 
-            // === 1. Считаем общие границы ВСЕХ фигур (с учётом вложенных) ===
+            // Считаем общие границы ВСЕХ фигур
             double minX = double.MaxValue, minY = double.MaxValue;
             double maxX = double.MinValue, maxY = double.MinValue;
 
@@ -2625,7 +2948,6 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             {
                 var shape = vis.Tag as ShapeBase;
 
-                // 🔹 Если это группа — учитываем границы её детей
                 if (shape is CompoundShape nestedCompound)
                 {
                     foreach (var child in nestedCompound.ChildShapes)
@@ -2649,35 +2971,29 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
 
             Point groupWorldAnchor = new Point((minX + maxX) / 2, (minY + maxY) / 2);
 
-            // === 2. «Распаковываем» группы и добавляем всех детей в новую группу ===
+            // Распаковываем группы и добавляем всех детей
             foreach (var vis in _selectedVisuals.ToList())
             {
                 var shape = vis.Tag as ShapeBase;
 
                 if (shape is CompoundShape nestedCompound)
                 {
-                    // 🔹 Если это группа — добавляем её детей (не саму группу!)
                     foreach (var child in nestedCompound.ChildShapes.ToList())
                     {
                         Point childWorld = GetChildWorldPosition(nestedCompound, vis, child);
-
-                        // Пересчитываем якорь относительно новой группы
                         child.AnchorPoint = new Point(
                             childWorld.X - groupWorldAnchor.X,
                             childWorld.Y - groupWorldAnchor.Y
                         );
-
                         compound.AddChildShape(child);
                     }
 
-                    // Удаляем старую группу
                     nestedCompound.ChildShapes.Clear();
                     DrawCanvas.Children.Remove(vis);
-                    RemoveShapeFromArray(compound);
+                    RemoveShapeFromArray(nestedCompound);
                 }
                 else
                 {
-                    // 🔹 Обычная фигура — добавляем как есть
                     Point childWorldPos = shape.GetAnchorWorldPosition(vis);
                     shape.AnchorPoint = new Point(
                         childWorldPos.X - groupWorldAnchor.X,
@@ -2699,6 +3015,39 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             RefreshShapesTree();
         }
 
+        private void UngroupSelected()
+        {
+            if (!(_currentShape is CompoundShape compound)) return;
+
+            Point groupWorldPos = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+
+            foreach (var child in compound.ChildShapes.ToList())
+            {
+                double angleRad = _currentShape.Angle * Math.PI / 180.0;
+                double cos = Math.Cos(angleRad);
+                double sin = Math.Sin(angleRad);
+
+                double lx = child.AnchorPoint.X * _currentShape.Scale;
+                double ly = child.AnchorPoint.Y * _currentShape.Scale;
+
+                double worldX = groupWorldPos.X + (lx * cos - ly * sin);
+                double worldY = groupWorldPos.Y + (lx * sin + ly * cos);
+
+                child.AnchorPoint = new Point(0, 0);
+                child.Scale *= _currentShape.Scale;
+                child.Angle += _currentShape.Angle;
+
+                var childVis = CreateShapeVisual(child, worldX, worldY);
+                DrawCanvas.Children.Add(childVis);
+                AddShapeToArray(child, childVis);
+            }
+
+            RemoveShapeFromArray(compound);
+            DrawCanvas.Children.Remove(_currentShapeVisual);
+
+            ClearSelection();
+            RefreshShapesTree();
+        }
         // 🔹 Вспомогательный метод: вычисление мировой позиции ребёнка внутри вложенной группы
         private Point GetChildWorldPosition(CompoundShape parent, Canvas parentVisual, ShapeBase child)
         {
@@ -2712,46 +3061,6 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             double ry = lx * sin + ly * cos;
 
             return new Point(parentWorld.X + rx, parentWorld.Y + ry);
-        }
-
-
-        private void UngroupSelected()
-        {
-            if (!(_currentShape is CompoundShape compound)) return;
-
-            Point groupWorldPos = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
-
-            foreach (var child in compound.ChildShapes.ToList())
-            {
-                // Пересчитываем локальное смещение в мировое с учетом поворота и масштаба группы
-                double angleRad = _currentShape.Angle * Math.PI / 180.0;
-                double cos = Math.Cos(angleRad);
-                double sin = Math.Sin(angleRad);
-
-                double lx = child.AnchorPoint.X * _currentShape.Scale;
-                double ly = child.AnchorPoint.Y * _currentShape.Scale;
-
-                double worldX = groupWorldPos.X + (lx * cos - ly * sin);
-                double worldY = groupWorldPos.Y + (lx * sin + ly * cos);
-
-                // Применяем трансформации группы к ребенку
-                child.AnchorPoint = new Point(0, 0); // Сбрасываем для удобства на холсте
-                child.Scale *= _currentShape.Scale;
-                child.Angle += _currentShape.Angle;
-                //child.Id = GetNextAvailableId(); 
-
-                // Возвращаем на холст как независимую фигуру
-                var childVis = CreateShapeVisual(child, worldX, worldY);
-                DrawCanvas.Children.Add(childVis);
-                AddShapeToArray(child, childVis);
-            }
-
-            // Удаляем саму группу
-            RemoveShapeFromArray(compound);
-            DrawCanvas.Children.Remove(_currentShapeVisual);
-
-            ClearSelection();
-            RefreshShapesTree();
         }
 
 
@@ -2964,19 +3273,29 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
         {
             ClearBoundingBox();
 
-            // Ищем визуал этой фигуры
             var visual = _allShapeVisuals.FirstOrDefault(v => ReferenceEquals(v.Tag, shape));
             if (visual == null) return;
 
-            if (shape is CompoundShape)
-            {
-                ShowBoundingBox(visual);                   
-            }
-            else
-            {
-                ShowBoundingBox(visual);
-            }
+            ShowBoundingBox(visual);
         }
+
+        //private void HighlightShapeOnCanvas(ShapeBase shape)
+        //{
+        //    ClearBoundingBox();
+
+        //    // Ищем визуал этой фигуры
+        //    var visual = _allShapeVisuals.FirstOrDefault(v => ReferenceEquals(v.Tag, shape));
+        //    if (visual == null) return;
+
+        //    if (shape is CompoundShape)
+        //    {
+        //        ShowBoundingBox(visual);                   
+        //    }
+        //    else
+        //    {
+        //        ShowBoundingBox(visual);
+        //    }
+        //}
 
         private void HighlightShape(ShapeBase shape)
         {
@@ -3114,22 +3433,78 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
         }
 
         // Методы сохранения/загрузки всех фигур
+        //private void SaveAllShapes(string filename)
+        //{
+        //    var shapesToSave = _allShapes.Select(s => MapShapeToData(s)).ToList();
+
+        //    var jsonFile = new JsonShapeFile
+        //    {
+        //        version = 1,
+        //        shapes = shapesToSave
+        //    };
+
+        //    var options = new JsonSerializerOptions { WriteIndented = true };
+        //    string jsonString = JsonSerializer.Serialize(jsonFile, options);
+        //    File.WriteAllText(filename, jsonString);
+        //}
+
         private void SaveAllShapes(string filename)
         {
-            var shapesToSave = _allShapes.Select(s => MapShapeToData(s)).ToList();
+            using var stream = System.IO.File.Create(filename);
+            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
 
-            var jsonFile = new JsonShapeFile
+            writer.WriteStartObject();
+            writer.WriteNumber("version", 2);
+            writer.WriteString("format", "ShapeEditor_v2");
+
+            writer.WritePropertyName("shapes");
+            writer.WriteStartArray();
+
+            foreach (var shape in _allShapes)
             {
-                version = 1,
-                shapes = shapesToSave
-            };
+                // Получаем мировую позицию якоря
+                var visual = _allShapeVisuals[Array.IndexOf(_allShapes, shape)];
+                Point worldPos = shape.GetAnchorWorldPosition(visual);
 
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            string jsonString = JsonSerializer.Serialize(jsonFile, options);
-            File.WriteAllText(filename, jsonString);
+                // Сохраняем фигуру, но ДО закрытия объекта добавляем worldX/worldY
+                // Для этого используем SaveToJson как базу, но дописываем координаты
+                SaveShapeWithWorldPosition(writer, shape, worldPos);
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+            writer.Flush();
         }
 
-        // Вспомогательный метод для рекурсивного маппинга
+        /// <summary>
+        /// Сохраняет фигуру в JSON и добавляет worldX/worldY в тот же объект.
+        /// </summary>
+        private void SaveShapeWithWorldPosition(Utf8JsonWriter writer, ShapeBase shape, Point worldPos)
+        {
+            // Используем MemoryStream для захвата вывода SaveToJson
+            using var ms = new System.IO.MemoryStream();
+            using var tempWriter = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = false });
+            shape.SaveToJson(tempWriter);
+            tempWriter.Flush();
+
+            string json = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            // Переписываем объект, добавляя worldX/worldY
+            writer.WriteStartObject();
+            foreach (var prop in root.EnumerateObject())
+            {
+                prop.WriteTo(writer);
+            }
+            writer.WriteNumber("worldX", worldPos.X);
+            writer.WriteNumber("worldY", worldPos.Y);
+            writer.WriteEndObject();
+        }
+
+
+
+        //Вспомогательный метод для рекурсивного маппинга
         private JsonShapeData MapShapeToData(ShapeBase s)
         {
             var data = new JsonShapeData
@@ -3178,22 +3553,79 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             return data;
         }
 
+        //private void LoadAllShapes(string filename)
+        //{
+        //    string jsonString = File.ReadAllText(filename);
+        //    var json = JsonSerializer.Deserialize<JsonShapeFile>(jsonString);
+
+        //    ClearAllShapes();
+
+        //    foreach (var shapeData in json.shapes)
+        //    {
+        //        ShapeBase shape = RestoreShapeFromData(shapeData);
+        //        if (shape == null) continue;
+
+        //        // Создаем визуал на основе восстановленных данных
+        //        var visual = CreateShapeVisual(shape, shapeData.worldX, shapeData.worldY);
+        //        DrawCanvas.Children.Add(visual);
+        //        AddShapeToArray(shape, visual);
+        //    }
+
+        //    RefreshShapesTree();
+        //}
+
         private void LoadAllShapes(string filename)
         {
-            string jsonString = File.ReadAllText(filename);
-            var json = JsonSerializer.Deserialize<JsonShapeFile>(jsonString);
+            string jsonString = System.IO.File.ReadAllText(filename);
+            using var doc = JsonDocument.Parse(jsonString);
+            var root = doc.RootElement;
+
+            int version = 1;
+            if (root.TryGetProperty("version", out var verProp))
+                version = verProp.GetInt32();
 
             ClearAllShapes();
 
-            foreach (var shapeData in json.shapes)
+            if (version >= 2)
             {
-                ShapeBase shape = RestoreShapeFromData(shapeData);
-                if (shape == null) continue;
+                if (root.TryGetProperty("shapes", out var shapesProp))
+                {
+                    foreach (var shapeData in shapesProp.EnumerateArray())
+                    {
+                        if (!shapeData.TryGetProperty("type", out var typeProp))
+                            continue;
 
-                // Создаем визуал на основе восстановленных данных
-                var visual = CreateShapeVisual(shape, shapeData.worldX, shapeData.worldY);
-                DrawCanvas.Children.Add(visual);
-                AddShapeToArray(shape, visual);
+                        string typeName = typeProp.GetString();
+                        ShapeBase shape = CreateShapeByType(typeName);
+                        if (shape == null) continue;
+
+                        shape.LoadFromJson(shapeData);
+
+                        double worldX = 0, worldY = 0;
+                        if (shapeData.TryGetProperty("worldX", out var wxProp))
+                            worldX = wxProp.GetDouble();
+                        if (shapeData.TryGetProperty("worldY", out var wyProp))
+                            worldY = wyProp.GetDouble();
+
+                        var visual = CreateShapeVisual(shape, worldX, worldY);
+                        DrawCanvas.Children.Add(visual);
+                        AddShapeToArray(shape, visual);
+                    }
+                }
+            }
+            else
+            {
+                // Старый формат
+                var jsonFile = JsonSerializer.Deserialize<JsonShapeFile>(jsonString);
+                foreach (var shapeData in jsonFile.shapes)
+                {
+                    ShapeBase shape = RestoreShapeFromData(shapeData);
+                    if (shape == null) continue;
+
+                    var visual = CreateShapeVisual(shape, shapeData.worldX, shapeData.worldY);
+                    DrawCanvas.Children.Add(visual);
+                    AddShapeToArray(shape, visual);
+                }
             }
 
             RefreshShapesTree();
@@ -3310,17 +3742,35 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                 tempVisual.Children.Clear();
             }
         }
+        //private ShapeBase CreateShapeByType(string typeName)
+        //{
+        //    return typeName switch
+        //    {
+        //        "RectangleShape" => new RectangleShape(),
+        //        "TriangleShape" => new TriangleShape(),
+        //        "TrapezoidShape" => new TrapezoidShape(),
+        //        "CircleShape" => new CircleShape(),
+        //        "HexagonShape" => new HexagonShape(),
+        //        "CustomShape" => new CustomShape(),
+        //        "CompoundShape" => new CompoundShape(),
+        //        _ => null
+        //    };
+        //}
+
         private ShapeBase CreateShapeByType(string typeName)
         {
             return typeName switch
             {
-                "RectangleShape" => new RectangleShape(),
-                "TriangleShape" => new TriangleShape(),
-                "TrapezoidShape" => new TrapezoidShape(),
-                "CircleShape" => new CircleShape(),
-                "HexagonShape" => new HexagonShape(),
+                "PolygonShape" => new PolygonShape(),
+                "EllipseShape" => new EllipseShape(),
                 "CustomShape" => new CustomShape(),
                 "CompoundShape" => new CompoundShape(),
+                // Обратная совместимость со старыми файлами
+                "RectangleShape" => PolygonShape.CreateRectangle(),
+                "TriangleShape" => PolygonShape.CreateTriangle(),
+                "TrapezoidShape" => PolygonShape.CreateTrapezoid(),
+                "CircleShape" => new EllipseShape { IsCircle = true, MajorAxis = 100 },
+                "HexagonShape" => PolygonShape.CreateHexagon(),
                 _ => null
             };
         }
@@ -3384,6 +3834,235 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             return false;
         }
 
+        // ==================== ПЕРЕТАСКИВАНИЕ ФОКУСОВ ЭЛЛИПСА ====================
+
+        //private void Focus_Down(object sender, MouseButtonEventArgs e)
+        //{
+        //    if (sender is not Ellipse ellipse) return;
+        //    if (ellipse.Parent is not Canvas shapeCanvas || shapeCanvas.Tag is not EllipseShape ellipseShape) return;
+
+        //    _currentShape = ellipseShape;
+        //    _currentShapeVisual = shapeCanvas;
+        //    _draggedFocusName = ellipse.Tag?.ToString();
+        //    _draggingFocus = true;
+
+        //    _focusDragStartMouse = e.GetPosition(DrawCanvas);
+        //    _focusDragOriginalF1 = ellipseShape.Focus1;
+        //    _focusDragOriginalF2 = ellipseShape.Focus2;
+
+        //    ellipse.CaptureMouse();
+        //    e.Handled = true;
+        //}
+
+        //private void Focus_Move(object sender, MouseEventArgs e)
+        //{
+        //    if (!_draggingFocus || _currentShape is not EllipseShape ellipseShape || _currentShapeVisual == null) return;
+        //    if (_isProcessingMove) return;
+        //    _isProcessingMove = true;
+
+        //    try
+        //    {
+        //        Point currentMouse = e.GetPosition(DrawCanvas);
+        //        Vector deltaWorld = currentMouse - _focusDragStartMouse;
+        //        Vector deltaLocal = deltaWorld / ellipseShape.Scale;
+
+        //        if (_draggedFocusName == "Focus1")
+        //        {
+        //            ellipseShape.Focus1 = new Point(
+        //                _focusDragOriginalF1.X + deltaLocal.X,
+        //                _focusDragOriginalF1.Y + deltaLocal.Y);
+        //        }
+        //        else if (_draggedFocusName == "Focus2")
+        //        {
+        //            ellipseShape.Focus2 = new Point(
+        //                _focusDragOriginalF2.X + deltaLocal.X,
+        //                _focusDragOriginalF2.Y + deltaLocal.Y);
+        //        }
+
+        //        // Пересчитываем параметры эллипса из новых фокусов
+        //        ellipseShape.UpdateParametersFromFoci();
+
+        //        // Перерисовываем
+        //        RedrawPreservingAnchor();
+        //    }
+        //    finally
+        //    {
+        //        _isProcessingMove = false;
+        //    }
+        //}
+
+        //private void Focus_Up(object sender, MouseButtonEventArgs e)
+        //{
+        //    (sender as Ellipse)?.ReleaseMouseCapture();
+        //    _draggingFocus = false;
+        //    _draggedFocusName = null;
+        //    e.Handled = true;
+        //}
+
+
+
+        // ==================== СОХРАНЕНИЕ / ЗАГРУЗКА ОТДЕЛЬНОЙ ФИГУРЫ ====================
+
+        /// <summary>
+        /// Сохраняет выделенную фигуру в JSON-файл
+        /// </summary>
+        private void SaveShapeToFile(object sender, RoutedEventArgs e)
+        {
+            if (_currentShape == null)
+            {
+                MessageBox.Show("Сначала выберите фигуру для сохранения.", "Сохранение фигуры",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var saveDialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = SHAPE_FILE_FILTER,
+                DefaultExt = ".shape.json",
+                AddExtension = true,
+                Title = "Сохранить фигуру",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+            };
+
+            if (saveDialog.ShowDialog() == true)
+            {
+                try
+                {
+                    using var stream = System.IO.File.Create(saveDialog.FileName);
+                    using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+
+                    _currentShape.SaveToJson(writer);
+                    writer.Flush();
+
+                    MessageBox.Show($"Фигура сохранена:\\n{saveDialog.FileName}",
+                        "Сохранение", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка при сохранении:\\n{ex.Message}",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Загружает фигуру из JSON-файла и добавляет на холст
+        /// </summary>
+        private void LoadShapeFromFile(object sender, RoutedEventArgs e)
+        {
+            var openDialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = SHAPE_FILE_FILTER,
+                DefaultExt = ".shape.json",
+                Title = "Загрузить фигуру",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+            };
+
+            if (openDialog.ShowDialog() != true) return;
+
+            try
+            {
+                string jsonString = System.IO.File.ReadAllText(openDialog.FileName);
+                using var doc = JsonDocument.Parse(jsonString);
+                var root = doc.RootElement;
+
+                if (!root.TryGetProperty("type", out var typeProp))
+                {
+                    MessageBox.Show("Файл не содержит тип фигуры.", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                string typeName = typeProp.GetString();
+                ShapeBase shape = typeName switch
+                {
+                    "PolygonShape" => new PolygonShape(),
+                    "EllipseShape" => new EllipseShape(),
+                    "CustomShape" => new CustomShape(),
+                    "CompoundShape" => new CompoundShape(),
+                    _ => null
+                };
+
+                if (shape == null)
+                {
+                    MessageBox.Show($"Неизвестный тип фигуры: {typeName}", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                shape.LoadFromJson(root);
+
+                // Синхронизация ID — чтобы не было конфликтов с существующими фигурами
+                int maxExistingId = _allShapes.Length > 0 ? _allShapes.Max(s => s.Id) : 0;
+                if (shape.Id <= maxExistingId)
+                {
+                    shape.Id = maxExistingId + 1;
+                }
+                // Обновляем глобальный счётчик
+                var field = typeof(ShapeBase).GetField("_globalIdCounter",
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Static);
+                if (field != null)
+                {
+                    int currentCounter = (int)field.GetValue(null);
+                    if (shape.Id > currentCounter)
+                        field.SetValue(null, shape.Id);
+                }
+
+                // Добавляем на холст в центр
+                DrawCanvas.UpdateLayout();
+                double worldX = DrawCanvas.ActualWidth / 2;
+                double worldY = DrawCanvas.ActualHeight / 2;
+
+                var visual = CreateShapeVisual(shape, worldX, worldY);
+                DrawCanvas.Children.Add(visual);
+                AddShapeToArray(shape, visual);
+
+                SelectShape(visual);
+                RefreshShapesTree();
+
+                MessageBox.Show($"Фигура загружена:\\n{openDialog.FileName}",
+                    "Загрузка", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при загрузке:\\n{ex.Message}",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+
+        /// <summary>
+        /// Находит все TextBox в панели с указанными Tag.
+        /// </summary>
+        private IEnumerable<TextBox> FindTextBoxesByTag(Panel panel, params string[] tags)
+        {
+            var tagSet = new HashSet<string>(tags);
+            var result = new List<TextBox>();
+            FindTextBoxesRecursive(panel, tagSet, result);
+            return result;
+        }
+
+        private void FindTextBoxesRecursive(DependencyObject parent, HashSet<string> tags, List<TextBox> result)
+        {
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is TextBox tb && tb.Tag != null && tags.Contains(tb.Tag.ToString()))
+                {
+                    result.Add(tb);
+                }
+                FindTextBoxesRecursive(child, tags, result);
+            }
+        }
+
+
+
+
+
+
+
         public class JsonShapeFile
         {
             public int version { get; set; }
@@ -3422,7 +4101,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             public string color { get; set; }
             public double thickness { get; set; }
             public double angleToNext { get; set; }
-            public bool angleLocked { get; set; }
+            public bool angleLocked { get; set; } 
             public bool lengthLocked { get; set; }
         }
 

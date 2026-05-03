@@ -89,6 +89,18 @@
                                 BorderBrush="{DynamicResource PrimaryHueMidBrush}"
                                 Foreground="{DynamicResource PrimaryHueMidBrush}"
                                 Margin="0,6"
+                                Background="Lavender" 
+                                Height="42"
+                                Click="AddEllipse">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <TextBlock Text="Эллипс" VerticalAlignment="Center" FontSize="16"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource MaterialDesignOutlinedButton}"
+                                BorderBrush="{DynamicResource PrimaryHueMidBrush}"
+                                Foreground="{DynamicResource PrimaryHueMidBrush}"
+                                Margin="0,6"
                                 Height="42"
                                                                 Background="Lavender" 
 
@@ -196,6 +208,10 @@
                                 <materialDesign:PackIcon Kind="DeleteSweep" Width="20" Height="20" Foreground="DarkRed"/>
                             </MenuItem.Icon>
                         </MenuItem>
+                    </MenuItem>
+                    <MenuItem Header="Фигура">
+                        <MenuItem Header="Сохранить фигуру в файл..." Click="SaveShapeToFile"/>
+                        <MenuItem Header="Загрузить фигуру из файла..." Click="LoadShapeFromFile"/>
                     </MenuItem>
 
                     <Separator/>

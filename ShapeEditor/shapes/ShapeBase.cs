@@ -1,13 +1,20 @@
+using ShapeEditor;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
-using System.IO;
 
-namespace ShapeEditor.shapes
+namespace ShapeEditor
 {
+    /// <summary>
+    /// Абстрактный базовый класс для всех фигур редактора.
+    /// Поддерживает только два типа базовых фигур: PolygonShape (многоугольники) и EllipseShape (эллипсы/окружности).
+    /// Каждая фигура самостоятельно реализует SaveToJson/LoadFromJson.
+    /// </summary>
     public abstract class ShapeBase
     {
         public int SidesCount { get; protected set; }
@@ -28,21 +35,18 @@ namespace ShapeEditor.shapes
         // Минимальные координаты bounding box последнего построения (в масштабированных координатах)
         public double MinX { get; protected set; }
         public double MinY { get; protected set; }
-
         public double MaxX { get; protected set; }
         public double MaxY { get; protected set; }
 
         public List<bool> EdgeLengthLocked { get; set; } = new();
 
-        // 🔹 Отображаемое имя на русском (переопределяется в наследниках)
+        // Отображаемое имя на русском (переопределяется в наследниках)
         public virtual string DisplayNameRu => "Фигура";
 
         private static int _globalIdCounter = 0;
 
-        // 🔹 Уникальный числовой ID (присваивается при создании)
-        public int Id { get; set;}
-
-        protected abstract Point[] GetDefaultVertices();
+        // Уникальный числовой ID (присваивается при создании)
+        public int Id { get; set; }
 
         public virtual string[] SideNames
         {
@@ -58,11 +62,12 @@ namespace ShapeEditor.shapes
         protected ShapeBase()
         {
             Vertices = GetDefaultVertices();
-            // initialize locks for each edge
             EdgeLengthLocked = new List<bool>(Vertices.Length);
             for (int i = 0; i < Vertices.Length; i++) EdgeLengthLocked.Add(false);
-                    Id = ++_globalIdCounter; 
+            Id = ++_globalIdCounter;
         }
+
+        protected abstract Point[] GetDefaultVertices();
 
         /// <summary>
         /// Возвращает текущие (повёрнутые) вершины без масштаба.
@@ -86,13 +91,11 @@ namespace ShapeEditor.shapes
         }
 
         /// <summary>
-        /// Притягивает точку к центральной линии ближайшего ребра (с учётом текущего поворота),
-        /// если она находится в пределах половины толщины этого ребра.
-        /// Для круга возвращает исходную точку.
+        /// Притягивает точку к центральной линии ближайшего ребра.
         /// </summary>
         public virtual Point SnapToEdgeCenter(Point point)
         {
-            if (this is CircleShape)
+            if (this is EllipseShape)
                 return point;
 
             if (Vertices.Length < 2)
@@ -133,12 +136,11 @@ namespace ShapeEditor.shapes
             return found ? bestPoint : point;
         }
 
-        // Проверка, находится ли точка (в немасштабированных локальных координатах) внутри фигуры с учётом текущего масштаба и поворота
+        // Проверка, находится ли точка внутри фигуры
         public virtual bool IsPointInside(Point localPoint)
         {
             if (Vertices.Length < 3) return false;
 
-            // Получаем повёрнутые и масштабированные вершины
             Point[] rotatedVerts = GetRotatedVertices();
             Point[] scaledVertices = new Point[rotatedVerts.Length];
             for (int i = 0; i < rotatedVerts.Length; i++)
@@ -146,11 +148,9 @@ namespace ShapeEditor.shapes
 
             Point scaledPoint = new Point(localPoint.X * Scale, localPoint.Y * Scale);
 
-            // Основная проверка (ray casting)
             bool inside = PointInPolygon(scaledPoint, scaledVertices);
             if (inside) return true;
 
-            // Дополнительная проверка – лежит ли точка на ребре (с epsilon = 1e-6)
             const double epsilon = 1e-6;
             for (int i = 0; i < scaledVertices.Length; i++)
             {
@@ -162,14 +162,13 @@ namespace ShapeEditor.shapes
             return false;
         }
 
-        // Алгоритм определения принадлежности точки полигону (ray casting)
-        public bool PointInPolygon(Point p, Point[] polygon)
+        private bool PointInPolygon(Point p, Point[] polygon)
         {
             bool inside = false;
             for (int i = 0, j = polygon.Length - 1; i < polygon.Length; j = i, i++)
             {
-                if (polygon[i].Y > p.Y != polygon[j].Y > p.Y &&
-                    p.X < (polygon[j].X - polygon[i].X) * (p.Y - polygon[i].Y) / (polygon[j].Y - polygon[i].Y) + polygon[i].X)
+                if (((polygon[i].Y > p.Y) != (polygon[j].Y > p.Y)) &&
+                    (p.X < (polygon[j].X - polygon[i].X) * (p.Y - polygon[i].Y) / (polygon[j].Y - polygon[i].Y) + polygon[i].X))
                 {
                     inside = !inside;
                 }
@@ -200,7 +199,7 @@ namespace ShapeEditor.shapes
             {
                 double val = (q.Y - p.Y) * (r.X - q.X) - (q.X - p.X) * (r.Y - q.Y);
                 if (Math.Abs(val) < 1e-9) return 0;
-                return val > 0 ? 1 : 2;
+                return (val > 0) ? 1 : 2;
             }
 
             int o1 = Orientation(a1, a2, b1);
@@ -227,7 +226,6 @@ namespace ShapeEditor.shapes
                 Point a2 = verts[(i + 1) % n];
                 for (int j = i + 1; j < n; j++)
                 {
-                    // skip adjacent
                     if (Math.Abs(i - j) <= 1) continue;
                     if (i == 0 && j == n - 1) continue;
 
@@ -258,14 +256,11 @@ namespace ShapeEditor.shapes
         {
             double left = Canvas.GetLeft(canvas);
             double top = Canvas.GetTop(canvas);
-
-            // Размеры canvas = Max - Min в масштабированных локальных координатах
             double width = MaxX - MinX;
             double height = MaxY - MinY;
 
-            // В WPF: Y растёт вниз, поэтому:
-            Point bottomLeft = new Point(left, top + height);      // левый нижний
-            Point topRight = new Point(left + width, top);         // правый верхний
+            Point bottomLeft = new Point(left, top + height);
+            Point topRight = new Point(left + width, top);
 
             return (bottomLeft, topRight);
         }
@@ -273,7 +268,7 @@ namespace ShapeEditor.shapes
         /// <summary>
         /// Возвращает длину ребра с указанным индексом (в немасштабированных локальных координатах)
         /// </summary>
-        public double GetEdgeLength(int edgeIndex)
+        public virtual double GetEdgeLength(int edgeIndex)
         {
             if (edgeIndex < 0 || edgeIndex >= Vertices.Length)
                 return 0;
@@ -293,51 +288,37 @@ namespace ShapeEditor.shapes
             if (edgeIndex < 0 || edgeIndex >= Vertices.Length || newLength <= 0)
                 return;
 
-            int n = Vertices.Length;
-
-            // Если ребро заблокировано, не меняем его
             if (EdgeLengthLocked != null && edgeIndex < EdgeLengthLocked.Count && EdgeLengthLocked[edgeIndex])
                 return;
 
-            // Специализированная логика для прямоугольника была перемещена в RectangleShape.
-            // По умолчанию: перемещаем только вторую вершину вдоль текущего направления ребра.
-
+            int n = Vertices.Length;
             Point p1 = Vertices[edgeIndex];
-            Point p2 = Vertices[(edgeIndex + 1) % Vertices.Length];
+            Point p2 = Vertices[(edgeIndex + 1) % n];
 
             Vector diff = p2 - p1;
             double currentLength = diff.Length;
 
-            if (currentLength < 1e-6)  // Очень маленькое значение, чтобы избежать деления на ноль
+            if (currentLength < 1e-6)
                 return;
 
-            // Новая логика: перемещаем только вторую вершину вдоль текущего направления ребра.
-            // Это минимально инвазивно и не меняет положение противоположных вершин, что
-            // предотвращает непредсказуемые искажения (параллелограммы) при последовательных изменениях.
-            Vector direction = diff / currentLength; // unit along edge from p1->p2
-            Point newP2Single = p1 + direction * newLength;
+            Vector direction = diff / currentLength;
+            Point newP2 = p1 + direction * newLength;
 
-            // Проверяем, не приведёт ли изменение к самопересечению полигона
-            Point[] newVertsSingle = (Point[])Vertices.Clone();
-            newVertsSingle[(edgeIndex + 1) % Vertices.Length] = newP2Single;
-            if (!IsSimplePolygon(newVertsSingle))
-            {
-                // Если стало самопересечением — отменяем изменение
+            Point[] newVerts = (Point[])Vertices.Clone();
+            newVerts[(edgeIndex + 1) % n] = newP2;
+            if (!IsSimplePolygon(newVerts))
                 return;
-            }
 
-            Vertices[(edgeIndex + 1) % Vertices.Length] = newP2Single;
+            Vertices[(edgeIndex + 1) % n] = newP2;
         }
 
         /// <summary>
-        /// Попытаться установить длины всех рёбер одновременно. По умолчанию просто вызывает SetEdgeLength для каждого ребра.
-        /// Возвращает true, если изменение успешно применено (не привело к ошибке), иначе false.
+        /// Попытаться установить длины всех рёбер одновременно.
         /// </summary>
         public virtual bool TrySetEdgeLengths(double[] lengths)
         {
             if (lengths == null || lengths.Length != Vertices.Length) return false;
 
-            // Применяем по очереди к каждому ребру, игнорируя заблокированные
             for (int i = 0; i < lengths.Length; i++)
             {
                 if (lengths[i] <= 0) return false;
@@ -345,7 +326,6 @@ namespace ShapeEditor.shapes
                     continue;
             }
 
-            // Клонируем вершины и пробуем применить последовательно, чтобы при ошибке откатить
             var backup = (Point[])Vertices.Clone();
             for (int i = 0; i < lengths.Length; i++)
             {
@@ -357,6 +337,9 @@ namespace ShapeEditor.shapes
             return true;
         }
 
+        /// <summary>
+        /// Строит визуальное представление фигуры на Canvas.
+        /// </summary>
         public virtual Canvas Build(double anchorWorldX, double anchorWorldY)
         {
             int n = Vertices.Length;
@@ -384,12 +367,12 @@ namespace ShapeEditor.shapes
                     AnchorPoint.Y + dx * sin + dy * cos);
             }
 
-            // Масштабируем повёрнутые вершины
+            // Масштабируем
             Point[] vertices = new Point[n];
             for (int i = 0; i < n; i++)
                 vertices[i] = new Point(rotatedVertices[i].X * Scale, rotatedVertices[i].Y * Scale);
 
-            // Единичные векторы сторон и внешние нормали
+            // Единичные векторы и нормали
             Vector[] e = new Vector[n];
             Vector[] nVec = new Vector[n];
             for (int i = 0; i < n; i++)
@@ -426,7 +409,7 @@ namespace ShapeEditor.shapes
                 }
             }
 
-            // Bounding box всех точек
+            // Bounding box
             double minX = double.MaxValue, maxX = double.MinValue;
             double minY = double.MaxValue, maxY = double.MinValue;
             foreach (var p in outer)
@@ -443,12 +426,8 @@ namespace ShapeEditor.shapes
             double width = maxX - minX;
             double height = maxY - minY;
 
-            // Сохраняем смещение
-            MinX = minX;
-            MinY = minY;
-
-            MaxX = maxX;
-            MaxY = maxY;
+            MinX = minX; MinY = minY;
+            MaxX = maxX; MaxY = maxY;
 
             Canvas canvas = new Canvas { Width = width, Height = height };
 
@@ -458,7 +437,7 @@ namespace ShapeEditor.shapes
                 Points = new PointCollection(),
                 Fill = Fill,
                 Stroke = null,
-                Tag = -1 // заливка
+                Tag = -1
             };
             foreach (var p in inner)
                 fillPoly.Points.Add(new Point(p.X - minX, p.Y - minY));
@@ -479,7 +458,7 @@ namespace ShapeEditor.shapes
                     },
                     Fill = colors[i],
                     Stroke = null,
-                    Tag = i // индекс стороны
+                    Tag = i
                 };
                 canvas.Children.Add(sidePoly);
             }
@@ -500,81 +479,121 @@ namespace ShapeEditor.shapes
             Canvas.SetTop(anchorDot, anchorLocalY - minY - 5);
             canvas.Children.Add(anchorDot);
 
-            // Вершины (кроме круга) – невидимые, но кликабельные
-            if (!(this is CircleShape))
+            // Вершины — невидимые, но кликабельные
+            for (int i = 0; i < n; i++)
             {
-                for (int i = 0; i < n; i++)
+                Ellipse vertexDot = new Ellipse
                 {
-                    Ellipse vertexDot = new Ellipse
-                    {
-                        Width = 8,
-                        Height = 8,
-                        Fill = Brushes.Transparent,
-                        Stroke = Brushes.Transparent,
-                        StrokeThickness = 0,
-                        Tag = i
-                    };
-                    Canvas.SetLeft(vertexDot, vertices[i].X - minX - 4);
-                    Canvas.SetTop(vertexDot, vertices[i].Y - minY - 4);
-                    canvas.Children.Add(vertexDot);
-                }
+                    Width = 8,
+                    Height = 8,
+                    Fill = Brushes.Transparent,
+                    Stroke = Brushes.Transparent,
+                    StrokeThickness = 0,
+                    Tag = i
+                };
+                Canvas.SetLeft(vertexDot, vertices[i].X - minX - 4);
+                Canvas.SetTop(vertexDot, vertices[i].Y - minY - 4);
+                canvas.Children.Add(vertexDot);
             }
 
-            // Позиционируем canvas так, чтобы точка привязки попала в anchorWorld
+            // Позиционируем canvas
             Canvas.SetLeft(canvas, anchorWorldX - anchorLocalX + minX);
             Canvas.SetTop(canvas, anchorWorldY - anchorLocalY + minY);
 
             return canvas;
         }
 
+        // ============================================================
+        // АБСТРАКТНЫЕ МЕТОДЫ СОХРАНЕНИЯ / ЗАГРУЗКИ JSON
+        // Каждая фигура реализует самостоятельно
+        // ============================================================
+
+        /// <summary>
+        /// Сохраняет фигуру в JSON-формате через Utf8JsonWriter.
+        /// Каждый наследник реализует самостоятельно.
+        /// </summary>
+        public abstract void SaveToJson(Utf8JsonWriter writer);
+
+        /// <summary>
+        /// Загружает фигуру из JSON-элемента.
+        /// Каждый наследник реализует самостоятельно.
+        /// </summary>
+        public abstract void LoadFromJson(JsonElement element);
+
+        /// <summary>
+        /// Сохраняет фигуру в JSON-файл (вспомогательный метод).
+        /// </summary>
+        public void SaveToFile(string filename)
+        {
+            using var stream = File.Create(filename);
+            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+            SaveToJson(writer);
+            writer.Flush();
+        }
+
+        /// <summary>
+        /// Загружает фигуру из JSON-файла (вспомогательный статический метод).
+        /// </summary>
+        public static ShapeBase LoadFromFile(string filename)
+        {
+            string jsonString = File.ReadAllText(filename);
+            using var doc = JsonDocument.Parse(jsonString);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("type", out var typeProp))
+                throw new InvalidDataException("JSON не содержит поле 'type'");
+
+            string typeName = typeProp.GetString();
+            ShapeBase shape = typeName switch
+            {
+                "PolygonShape" => new PolygonShape(),
+                "EllipseShape" => new EllipseShape(),
+                "CustomShape" => new CustomShape(),
+                "CompoundShape" => new CompoundShape(),
+                _ => throw new InvalidDataException($"Неизвестный тип фигуры: {typeName}")
+            };
+
+            shape.LoadFromJson(root);
+            return shape;
+        }
+
+        // ============================================================
+        // УСТАРЕВШИЕ МЕТОДЫ БИНАРНОЙ СЕРИАЛИЗАЦИИ (для совместимости)
+        // ============================================================
 
         public virtual void Save(BinaryWriter writer)
         {
-            // Тип фигуры
             string typeName = GetType().Name;
             writer.Write(typeName.Length);
-            writer.Write(typeName.ToCharArray());  // <-- Исправлено: пишем как массив символов
+            writer.Write(typeName.ToCharArray());
 
-            // Базовые параметры
             writer.Write(Id);
             writer.Write(Scale);
             writer.Write(Angle);
             writer.Write(AnchorPoint.X);
             writer.Write(AnchorPoint.Y);
 
-            // Fill color (ARGB)
             var fillColor = Fill is SolidColorBrush scb ? scb.Color : Colors.Transparent;
             writer.Write(fillColor.A);
             writer.Write(fillColor.R);
             writer.Write(fillColor.G);
             writer.Write(fillColor.B);
 
-            // Side colors
             writer.Write(SideColors.Count);
             for (int i = 0; i < SideColors.Count; i++)
             {
                 var c = SideColors[i] is SolidColorBrush sc ? sc.Color : Colors.Black;
-                writer.Write(c.A);
-                writer.Write(c.R);
-                writer.Write(c.G);
-                writer.Write(c.B);
+                writer.Write(c.A); writer.Write(c.R); writer.Write(c.G); writer.Write(c.B);
             }
 
-            // Side thickness
             writer.Write(SideThickness.Count);
             for (int i = 0; i < SideThickness.Count; i++)
-            {
                 writer.Write(SideThickness[i]);
-            }
 
-            // Edge locks
             writer.Write(EdgeLengthLocked.Count);
             for (int i = 0; i < EdgeLengthLocked.Count; i++)
-            {
                 writer.Write(EdgeLengthLocked[i]);
-            }
 
-            // Vertices
             writer.Write(Vertices.Length);
             for (int i = 0; i < Vertices.Length; i++)
             {
@@ -585,13 +604,9 @@ namespace ShapeEditor.shapes
             writer.Write(SidesCount);
         }
 
-        /// <summary>
-        /// Загружает фигуру из бинарного потока
-        /// </summary>
         public virtual void Load(BinaryReader reader)
         {
             Id = reader.ReadInt32();
-            // Обновляем глобальный счетчик
             var field = typeof(ShapeBase).GetField("_globalIdCounter",
                 System.Reflection.BindingFlags.NonPublic |
                 System.Reflection.BindingFlags.Static);
@@ -605,50 +620,52 @@ namespace ShapeEditor.shapes
             Angle = reader.ReadDouble();
             AnchorPoint = new Point(reader.ReadDouble(), reader.ReadDouble());
 
-            // Fill color
-            byte a = reader.ReadByte();
-            byte r = reader.ReadByte();
-            byte g = reader.ReadByte();
-            byte b = reader.ReadByte();
+            byte a = reader.ReadByte(), r = reader.ReadByte(), g = reader.ReadByte(), b = reader.ReadByte();
             Fill = new SolidColorBrush(Color.FromArgb(a, r, g, b));
 
-            // Side colors
             int colorCount = reader.ReadInt32();
             SideColors.Clear();
             for (int i = 0; i < colorCount; i++)
             {
-                byte ca = reader.ReadByte();
-                byte cr = reader.ReadByte();
-                byte cg = reader.ReadByte();
-                byte cb = reader.ReadByte();
+                byte ca = reader.ReadByte(), cr = reader.ReadByte(), cg = reader.ReadByte(), cb = reader.ReadByte();
                 SideColors.Add(new SolidColorBrush(Color.FromArgb(ca, cr, cg, cb)));
             }
 
-            // Side thickness
             int thickCount = reader.ReadInt32();
             SideThickness.Clear();
             for (int i = 0; i < thickCount; i++)
-            {
                 SideThickness.Add(reader.ReadDouble());
-            }
 
-            // Edge locks
             int lockCount = reader.ReadInt32();
             EdgeLengthLocked.Clear();
             for (int i = 0; i < lockCount; i++)
-            {
                 EdgeLengthLocked.Add(reader.ReadBoolean());
-            }
 
-            // Vertices
             int vertCount = reader.ReadInt32();
             Vertices = new Point[vertCount];
             for (int i = 0; i < vertCount; i++)
-            {
                 Vertices[i] = new Point(reader.ReadDouble(), reader.ReadDouble());
-            }
 
             SidesCount = reader.ReadInt32();
+        }
+
+        // Вспомогательные методы для цветов
+        protected static string GetColorHex(Brush brush)
+        {
+            if (brush is SolidColorBrush scb)
+                return $"#{scb.Color.A:X2}{scb.Color.R:X2}{scb.Color.G:X2}{scb.Color.B:X2}";
+            return "#00FFFFFF";
+        }
+
+        protected static Brush ParseColor(string hex)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(hex)) return Brushes.Black;
+                var color = (Color)ColorConverter.ConvertFromString(hex);
+                return new SolidColorBrush(color);
+            }
+            catch { return Brushes.Black; }
         }
     }
 }
