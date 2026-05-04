@@ -326,7 +326,7 @@ namespace ShapeEditor
 
         public override void LoadFromJson(JsonElement element)
         {
-            if (element.TryGetProperty("id", out var idProp)) Id = idProp.GetInt32();
+            //if (element.TryGetProperty("id", out var idProp)) Id = idProp.GetInt32();
             if (element.TryGetProperty("scale", out var sProp)) Scale = sProp.GetDouble();
             if (element.TryGetProperty("angle", out var aProp)) Angle = aProp.GetDouble();
             if (element.TryGetProperty("anchorX", out var axProp) && element.TryGetProperty("anchorY", out var ayProp))

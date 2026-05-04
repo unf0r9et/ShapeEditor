@@ -21,8 +21,8 @@ namespace ShapeEditor
         // === ВНУТРЕННИЕ ПОЛНЫЕ ОСИ ===
         // _axisX — полная ось по X (горизонтальная)
         // _axisY — полная ось по Y (вертикальная)
-        private double _axisX = 100;   // начальная горизонтальная
-        private double _axisY = 60;    // начальная вертикальная
+        private double _axisX = 120;   // начальная горизонтальная
+        private double _axisY = 89.4;    // начальная вертикальная
         private double _focalDistance = 40; // c = sqrt(|(axisX/2)² - (axisY/2)²|)
 
         // === ПУБЛИЧНЫЕ СВОЙСТВА ДЛЯ UI ===
@@ -249,130 +249,124 @@ namespace ShapeEditor
 
         public override Canvas Build(double anchorWorldX, double anchorWorldY)
         {
-            // Полные оси для отрисовки
+            // 1. Проверка групп (оставляем без изменений)
+            var mainWin = System.Windows.Application.Current.MainWindow as MainWindow;
+            bool shouldShowHelpers = true;
+
+            if (mainWin != null)
+            {
+                var allShapesField = typeof(MainWindow).GetField("_allShapes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var allShapes = allShapesField?.GetValue(mainWin) as ShapeBase[];
+                if (allShapes != null)
+                {
+                    foreach (var s in allShapes)
+                    {
+                        if (s is CompoundShape group && group.ChildShapes.Contains(this))
+                        {
+                            shouldShowHelpers = MainWindow.IsEditingThisChild(group, this) || MainWindow.IsHighlightedChild(group, this);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 2. Геометрия
             double width = _axisX * Scale;
             double height = _axisY * Scale;
-
-            var canvas = new Canvas { Width = width, Height = height };
-
             double angleRad = Angle * Math.PI / 180.0;
             double cos = Math.Cos(angleRad);
             double sin = Math.Sin(angleRad);
 
-            // === Заливка ===
-            var fillEllipse = new Ellipse
-            {
-                Width = width,
-                Height = height,
-                Fill = Fill,
-                Stroke = null,
-                Tag = -1
-            };
-            fillEllipse.RenderTransform = new RotateTransform(Angle, width / 2, height / 2);
-            Canvas.SetLeft(fillEllipse, 0);
-            Canvas.SetTop(fillEllipse, 0);
-            canvas.Children.Add(fillEllipse);
+            double a = width / 2;
+            double b = height / 2;
 
-            // === Обводка ===
-            var color = SideColors.Count > 0 ? SideColors[0] : Brushes.Black;
-            var thickness = SideThickness.Count > 0 ? SideThickness[0] : 3.0;
-            var strokeEllipse = new Ellipse
-            {
-                Width = width,
-                Height = height,
-                Stroke = color,
-                StrokeThickness = thickness,
-                Fill = Brushes.Transparent,
-                StrokeLineJoin = PenLineJoin.Round,
-                Tag = 0
-            };
-            strokeEllipse.RenderTransform = new RotateTransform(Angle, width / 2, height / 2);
-            Canvas.SetLeft(strokeEllipse, 0);
-            Canvas.SetTop(strokeEllipse, 0);
-            canvas.Children.Add(strokeEllipse);
-
-            // === Фокусы ===
-            if (!IsCircle)
-            {
-                double c = _focalDistance * Scale;
-                double cx = width / 2;
-                double cy = height / 2;
-
-                // Фокусы на оси с БОЛЬШЕЙ полуосью
-                double f1lx, f1ly, f2lx, f2ly;
-
-                if (FociOnYAxis)
-                {
-                    // Большая ось вертикальная — фокусы на Y
-                    f1lx = 0; f1ly = -c;
-                    f2lx = 0; f2ly = c;
-                }
-                else
-                {
-                    // Большая ось горизонтальная — фокусы на X
-                    f1lx = -c; f1ly = 0;
-                    f2lx = c; f2ly = 0;
-                }
-
-                // Поворачиваем вокруг центра
-                double f1x = f1lx * cos - f1ly * sin + cx - 6;
-                double f1y = f1lx * sin + f1ly * cos + cy - 6;
-
-                var f1 = new Ellipse
-                {
-                    Width = 12,
-                    Height = 12,
-                    Fill = Brushes.Yellow,
-                    Stroke = Brushes.OrangeRed,
-                    StrokeThickness = 2,
-                    Tag = "Focus1",
-                    ToolTip = "Фокус 1",
-                    IsHitTestVisible = false
-                };
-                Canvas.SetLeft(f1, f1x);
-                Canvas.SetTop(f1, f1y);
-                canvas.Children.Add(f1);
-
-                double f2x = f2lx * cos - f2ly * sin + cx - 6;
-                double f2y = f2lx * sin + f2ly * cos + cy - 6;
-
-                var f2 = new Ellipse
-                {
-                    Width = 12,
-                    Height = 12,
-                    Fill = Brushes.Yellow,
-                    Stroke = Brushes.OrangeRed,
-                    StrokeThickness = 2,
-                    Tag = "Focus2",
-                    ToolTip = "Фокус 2",
-                    IsHitTestVisible = false
-                };
-                Canvas.SetLeft(f2, f2x);
-                Canvas.SetTop(f2, f2y);
-                canvas.Children.Add(f2);
-            }
-
-            // === Точка привязки (центр) ===
+            // Смещение якоря относительно центра (в масштабе)
             double ax = AnchorPoint.X * Scale;
             double ay = AnchorPoint.Y * Scale;
-            var anchorDot = new Ellipse
+
+            // --- МАТЕМАТИКА ОРБИТАЛЬНОГО ВРАЩЕНИЯ ---
+            // Вектор от якоря к центру фигуры в не повернутом состоянии: (-ax, -ay)
+            // Поворачиваем этот вектор на текущий угол, чтобы найти положение центра относительно якоря
+            double rotatedVecX = -ax * cos + ay * sin;
+            double rotatedVecY = -ax * sin - ay * cos;
+
+            // Расчет Bounding Box самого эллипса (вокруг его собственного центра)
+            double halfW = Math.Sqrt(a * a * cos * cos + b * b * sin * sin);
+            double halfH = Math.Sqrt(a * a * sin * sin + b * b * cos * cos);
+
+            // Создаем Canvas строго под размер повернутого эллипса
+            var canvas = new Canvas { Width = halfW * 2, Height = halfH * 2, Tag = this };
+            double cx = canvas.Width / 2;
+            double cy = canvas.Height / 2;
+
+            // Отрисовка эллипса (вращается вокруг СВОЕГО центра внутри Canvas)
+            var rotateTransform = new RotateTransform(Angle, width / 2, height / 2);
+
+            void SetupShape(Shape shape)
             {
-                Width = 10,
-                Height = 10,
-                Fill = Brushes.White,
-                Stroke = Brushes.Purple,
-                StrokeThickness = 1,
-                Tag = "Anchor"
-            };
-            Canvas.SetLeft(anchorDot, ax + width / 2 - 5);
-            Canvas.SetTop(anchorDot, ay + height / 2 - 5);
-            canvas.Children.Add(anchorDot);
+                shape.Width = width;
+                shape.Height = height;
+                shape.RenderTransform = rotateTransform;
+                Canvas.SetLeft(shape, cx - width / 2);
+                Canvas.SetTop(shape, cy - height / 2);
+                canvas.Children.Add(shape);
+            }
 
-            // Границы
-            MinX = -width / 2; MinY = -height / 2;
-            MaxX = width / 2; MaxY = height / 2;
+            SetupShape(new Ellipse { Fill = Fill });
+            SetupShape(new Ellipse
+            {
+                Stroke = SideColors.Count > 0 ? SideColors[0] : Brushes.Black,
+                StrokeThickness = SideThickness.Count > 0 ? SideThickness[0] : 3.0,
+                Tag = 0
+            });
 
-            // Позиционирование
+            // 3. Вспомогательные точки
+            if (shouldShowHelpers)
+            {
+                // Фокусы (вращаются вокруг центра эллипса)
+                if (!IsCircle)
+                {
+                    double c = _focalDistance * Scale;
+                    double f1lx = FociOnYAxis ? 0 : -c;
+                    double f1ly = FociOnYAxis ? -c : 0;
+                    double f2lx = FociOnYAxis ? 0 : c;
+                    double f2ly = FociOnYAxis ? c : 0;
+
+                    void DrawFocus(double fx, double fy, string tag)
+                    {
+                        // Поворот фокусов относительно центра эллипса
+                        double rfx = fx * cos - fy * sin;
+                        double rfy = fx * sin + fy * cos;
+                        var f = new Ellipse { Width = 12, Height = 12, Fill = Brushes.Yellow, Stroke = Brushes.OrangeRed, StrokeThickness = 2, IsHitTestVisible = false, Tag = tag };
+                        Canvas.SetLeft(f, cx + rfx - 6);
+                        Canvas.SetTop(f, cy + rfy - 6);
+                        canvas.Children.Add(f);
+                    }
+                    DrawFocus(f1lx, f1ly, "Focus1");
+                    DrawFocus(f2lx, f2ly, "Focus2");
+                }
+
+                // Якорь (фиолетовая точка)
+                // Его положение в Canvas: центр эллипса + повернутый вектор (ax, ay)
+                double curAnchorLocalX = ax * cos - ay * sin;
+                double curAnchorLocalY = ax * sin + ay * cos;
+                var anchorDot = new Ellipse { Width = 10, Height = 10, Fill = Brushes.White, Stroke = Brushes.Purple, StrokeThickness = 1, Tag = "Anchor" };
+                Canvas.SetLeft(anchorDot, cx + curAnchorLocalX - 5);
+                Canvas.SetTop(anchorDot, cy + curAnchorLocalY - 5);
+                canvas.Children.Add(anchorDot);
+            }
+
+            // --- 4. ФИНАЛЬНОЕ ПОЗИЦИОНИРОВАНИЕ ---
+            // Чтобы эллипс вращался вокруг якоря, нам нужно, чтобы при изменении Angle 
+            // MinX и MinY менялись так, будто центр Canvas движется по орбите.
+
+            // Новое значение MinX/MinY для формулы (anchorWorldX - ax + MinX)
+            MinX = rotatedVecX + ax - halfW;
+            MaxX = rotatedVecX + ax + halfW;
+            MinY = rotatedVecY + ay - halfH;
+            MaxY = rotatedVecY + ay + halfH;
+
+            // Применяем вашу формулу из изначального кода
             Canvas.SetLeft(canvas, anchorWorldX - ax + MinX);
             Canvas.SetTop(canvas, anchorWorldY - ay + MinY);
 
@@ -427,7 +421,7 @@ namespace ShapeEditor
 
         public override void LoadFromJson(JsonElement element)
         {
-            if (element.TryGetProperty("id", out var idProp)) Id = idProp.GetInt32();
+            //if (element.TryGetProperty("id", out var idProp)) Id = idProp.GetInt32();
             if (element.TryGetProperty("scale", out var sProp)) Scale = sProp.GetDouble();
             if (element.TryGetProperty("angle", out var aProp)) Angle = aProp.GetDouble();
             if (element.TryGetProperty("anchorX", out var axProp) && element.TryGetProperty("anchorY", out var ayProp))

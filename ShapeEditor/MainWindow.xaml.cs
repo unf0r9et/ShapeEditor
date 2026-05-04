@@ -24,6 +24,7 @@ namespace ShapeEditor
         private Canvas draggedShapeCanvas;
         private double startLeft;
         private double startTop;
+        private Point _figureCenterWorld; // Точный центр фигуры, который не должен двигаться
         // Для редакта ребёнка 
         private bool _isEditingChildInPlace = false;
         private Canvas _originalParentVisual = null;    
@@ -2215,17 +2216,29 @@ namespace ShapeEditor
         private void VertexAnchor_Down(object sender, MouseButtonEventArgs e)
         {
             if (sender is not Ellipse ellipse) return;
+            if (ellipse.Parent is not Canvas shapeCanvas || shapeCanvas.Tag is not ShapeBase shape) return;
 
-            if (ellipse.Parent is Canvas shapeCanvas && shapeCanvas.Tag is ShapeBase shape)
-            {
-                _currentShape = shape;
-                _currentShapeVisual = shapeCanvas;
-                anchorDragCanvas = shapeCanvas;
-            }
-            else return;
+            _currentShape = shape;
+            _currentShapeVisual = shapeCanvas;
 
-            dragStartWorld = e.GetPosition(DrawCanvas);
-            originalAnchorPos = _currentShape.AnchorPoint;
+            // 1. Текущая мировая позиция якоря
+            Point currentAnchorWorld = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+
+            // 2. Вычисляем вектор от центра фигуры до якоря в мировых координатах
+            double rad = _currentShape.Angle * Math.PI / 180.0;
+            double cos = Math.Cos(rad);
+            double sin = Math.Sin(rad);
+
+            double localAx = _currentShape.AnchorPoint.X * _currentShape.Scale;
+            double localAy = _currentShape.AnchorPoint.Y * _currentShape.Scale;
+
+            // Мировой вектор от центра к якорю
+            double worldVecX = localAx * cos - localAy * sin;
+            double worldVecY = localAx * sin + localAy * cos;
+
+            // 3. Запоминаем мировой центр фигуры — он будет нашей "мертвой" точкой
+            _figureCenterWorld = new Point(currentAnchorWorld.X - worldVecX, currentAnchorWorld.Y - worldVecY);
+
             draggingAnchor = true;
             ellipse.CaptureMouse();
             e.Handled = true;
@@ -2233,32 +2246,40 @@ namespace ShapeEditor
 
         private void VertexAnchor_Move(object sender, MouseEventArgs e)
         {
-            if (!draggingAnchor || _currentShape == null || anchorDragCanvas == null) return;
+            if (!draggingAnchor || _currentShape == null || _currentShapeVisual == null) return;
             if (_isProcessingMove) return;
 
             _isProcessingMove = true;
             try
             {
-                Point currentWorld = e.GetPosition(DrawCanvas);
-                Vector deltaWorld = currentWorld - dragStartWorld;
-                Vector deltaLocal = deltaWorld / _currentShape.Scale;
+                // 1. Позиция мыши — это идеальный новый мировой якорь
+                Point currentMouseWorld = e.GetPosition(DrawCanvas);
 
+                // 2. Вектор от НЕПОДВИЖНОГО центра до мыши
+                double dx = currentMouseWorld.X - _figureCenterWorld.X;
+                double dy = currentMouseWorld.Y - _figureCenterWorld.Y;
+
+                // 3. Переводим этот вектор в локальные координаты (обратный поворот)
+                double rad = _currentShape.Angle * Math.PI / 180.0;
+                double invCos = Math.Cos(-rad);
+                double invSin = Math.Sin(-rad);
+
+                // Обновляем локальный AnchorPoint БЕЗ округлений
                 _currentShape.AnchorPoint = new Point(
-                    Math.Round(originalAnchorPos.X + deltaLocal.X),
-                    Math.Round(originalAnchorPos.Y + deltaLocal.Y));
+                    (dx * invCos - dy * invSin) / _currentShape.Scale,
+                    (dx * invSin + dy * invCos) / _currentShape.Scale
+                );
 
-                RedrawPreservingAnchorWithMouseCapture();
+                // 4. Перерисовываем визуал строго в точке мыши
+                RedrawAtPoint(currentMouseWorld);
             }
             finally
             {
                 _isProcessingMove = false;
             }
         }
-
-        private void RedrawPreservingAnchorWithMouseCapture()
+        private void RedrawAtPoint(Point worldPoint)
         {
-            if (_currentShape == null || _currentShapeVisual == null) return;
-            Point worldAnchor = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
             bool wasSelected = (_selectedShapeVisual == _currentShapeVisual);
 
             if (DrawCanvas.Children.Contains(_currentShapeVisual))
@@ -2267,14 +2288,12 @@ namespace ShapeEditor
             if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
                 DrawCanvas.Children.Remove(_boundingBoxVisual);
 
-            // Создаем новый визуал
-            _currentShapeVisual = CreateShapeVisual(_currentShape, worldAnchor.X, worldAnchor.Y);
+            // Создаем новый визуал. Точка привязки будет точно под курсором.
+            _currentShapeVisual = CreateShapeVisual(_currentShape, worldPoint.X, worldPoint.Y);
             DrawCanvas.Children.Add(_currentShapeVisual);
 
-            // Обновляем глобальный список визуалов (ИСПРАВЛЕНО: используем _currentShapeVisual вместо newVisual)
             int idx = Array.IndexOf(_allShapes, _currentShape);
-            if (idx >= 0)
-                _allShapeVisuals[idx] = _currentShapeVisual;
+            if (idx >= 0) _allShapeVisuals[idx] = _currentShapeVisual;
 
             if (wasSelected)
             {
@@ -2284,7 +2303,7 @@ namespace ShapeEditor
 
             if (_paramsPanelIsOpen) RefreshParamsPanelValues();
 
-            // Восстанавливаем захват мыши
+            // Восстанавливаем захват
             foreach (UIElement child in _currentShapeVisual.Children)
             {
                 if (child is Ellipse ellipse && ellipse.Tag?.ToString() == "Anchor")
@@ -2294,6 +2313,45 @@ namespace ShapeEditor
                 }
             }
         }
+        //private void RedrawPreservingAnchorWithMouseCapture()
+        //{
+        //    if (_currentShape == null || _currentShapeVisual == null) return;
+        //    Point worldAnchor = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+        //    bool wasSelected = (_selectedShapeVisual == _currentShapeVisual);
+
+        //    if (DrawCanvas.Children.Contains(_currentShapeVisual))
+        //        DrawCanvas.Children.Remove(_currentShapeVisual);
+
+        //    if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
+        //        DrawCanvas.Children.Remove(_boundingBoxVisual);
+
+        //    // Создаем новый визуал
+        //    _currentShapeVisual = CreateShapeVisual(_currentShape, worldAnchor.X, worldAnchor.Y);
+        //    DrawCanvas.Children.Add(_currentShapeVisual);
+
+        //    // Обновляем глобальный список визуалов (ИСПРАВЛЕНО: используем _currentShapeVisual вместо newVisual)
+        //    int idx = Array.IndexOf(_allShapes, _currentShape);
+        //    if (idx >= 0)
+        //        _allShapeVisuals[idx] = _currentShapeVisual;
+
+        //    if (wasSelected)
+        //    {
+        //        _selectedShapeVisual = _currentShapeVisual;
+        //        ShowBoundingBox(_currentShapeVisual);
+        //    }
+
+        //    if (_paramsPanelIsOpen) RefreshParamsPanelValues();
+
+        //    // Восстанавливаем захват мыши
+        //    foreach (UIElement child in _currentShapeVisual.Children)
+        //    {
+        //        if (child is Ellipse ellipse && ellipse.Tag?.ToString() == "Anchor")
+        //        {
+        //            ellipse.CaptureMouse();
+        //            break;
+        //        }
+        //    }
+        //}
 
         private void VertexAnchor_Up(object sender, MouseButtonEventArgs e)
         {
@@ -3019,35 +3077,47 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
         {
             if (!(_currentShape is CompoundShape compound)) return;
 
+            // 1. Сначала сохраняем нужные данные
             Point groupWorldPos = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+            var childrenToMove = compound.ChildShapes.ToList();
+            var oldGroupVisual = _currentShapeVisual;
 
-            foreach (var child in compound.ChildShapes.ToList())
+            // 2. КРИТИЧЕСКИЙ МОМЕНТ: Сбрасываем выделение и удаляем группу из списков ДО создания новых визуалов
+            // Это обнулит _currentShape, и Build() у эллипсов не будет прятать точки
+            ClearSelection();
+            RemoveShapeFromArray(compound);
+            DrawCanvas.Children.Remove(oldGroupVisual);
+
+            // 3. Очищаем список детей у самой модели группы, 
+            // чтобы эллипсы при Build() не могли найти родителя через проверку .Contains(this)
+            compound.ChildShapes.Clear();
+
+            foreach (var child in childrenToMove)
             {
-                double angleRad = _currentShape.Angle * Math.PI / 180.0;
+                double angleRad = compound.Angle * Math.PI / 180.0;
                 double cos = Math.Cos(angleRad);
                 double sin = Math.Sin(angleRad);
 
-                double lx = child.AnchorPoint.X * _currentShape.Scale;
-                double ly = child.AnchorPoint.Y * _currentShape.Scale;
+                double lx = child.AnchorPoint.X * compound.Scale;
+                double ly = child.AnchorPoint.Y * compound.Scale;
 
                 double worldX = groupWorldPos.X + (lx * cos - ly * sin);
                 double worldY = groupWorldPos.Y + (lx * sin + ly * cos);
 
                 child.AnchorPoint = new Point(0, 0);
-                child.Scale *= _currentShape.Scale;
-                child.Angle += _currentShape.Angle;
+                child.Scale *= compound.Scale;
+                child.Angle += compound.Angle;
 
+                // Теперь Build() выполнится корректно, так как родителя больше нет в массивах, 
+                // а _currentShape == null
                 var childVis = CreateShapeVisual(child, worldX, worldY);
                 DrawCanvas.Children.Add(childVis);
                 AddShapeToArray(child, childVis);
             }
 
-            RemoveShapeFromArray(compound);
-            DrawCanvas.Children.Remove(_currentShapeVisual);
-
-            ClearSelection();
             RefreshShapesTree();
         }
+
         // 🔹 Вспомогательный метод: вычисление мировой позиции ребёнка внутри вложенной группы
         private Point GetChildWorldPosition(CompoundShape parent, Canvas parentVisual, ShapeBase child)
         {
@@ -3202,9 +3272,6 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
         }
 
 
-
-
-
         private void ShowBoundingBoxForNestedChild(Canvas childVisual, Canvas parentVisual)
         {
             ClearBoundingBox();
@@ -3297,25 +3364,25 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
         //    }
         //}
 
-        private void HighlightShape(ShapeBase shape)
-        {
-            ClearBoundingBox();
+        //private void HighlightShape(ShapeBase shape)
+        //{
+        //    ClearBoundingBox();
 
-            // Ищем визуал этой фигуры
-            var visual = _allShapeVisuals.FirstOrDefault(v => v.Tag == shape);
-            if (visual == null) return;
+        //    // Ищем визуал этой фигуры
+        //    var visual = _allShapeVisuals.FirstOrDefault(v => v.Tag == shape);
+        //    if (visual == null) return;
 
-            if (shape is CompoundShape)
-            {
-                // Для группы используем обычный bounding box
-                ShowBoundingBox(visual);
-            }
-            else
-            {
-                // Для обычной фигуры — стандартный bounding box
-                ShowBoundingBox(visual);
-            }
-        }
+        //    if (shape is CompoundShape)
+        //    {
+        //        // Для группы используем обычный bounding box
+        //        ShowBoundingBox(visual);
+        //    }
+        //    else
+        //    {
+        //        // Для обычной фигуры — стандартный bounding box
+        //        ShowBoundingBox(visual);
+        //    }
+        //}
 
 
         private void AddShapeToArray(ShapeBase shape, Canvas visual)
