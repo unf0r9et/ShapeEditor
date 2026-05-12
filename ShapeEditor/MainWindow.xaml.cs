@@ -10,9 +10,9 @@ using Drawing = System.Drawing;
 using System.IO;
 using System.Reflection;
 using Microsoft.Win32;
-using System.Text.Json;           
+using System.Text;
+using System.Text.Json;
 using System.Globalization;
-using ShapeEditor;
 
 namespace ShapeEditor
 {
@@ -27,10 +27,10 @@ namespace ShapeEditor
         private Point _figureCenterWorld; // Точный центр фигуры, который не должен двигаться
         // Для редакта ребёнка 
         private bool _isEditingChildInPlace = false;
-        private Canvas _originalParentVisual = null;    
-        private Canvas _childNestedVisual = null;       
-        private double _childWorldX, _childWorldY;      
-        private Point _childOriginalAnchor;              
+        private Canvas _originalParentVisual = null;
+        private Canvas _childNestedVisual = null;
+        private double _childWorldX, _childWorldY;
+        private Point _childOriginalAnchor;
         // Перетаскивание якоря
         private bool draggingAnchor;
         private Point dragStartWorld;
@@ -41,6 +41,8 @@ namespace ShapeEditor
         private Canvas _currentShapeVisual;
         private Canvas _selectedShapeVisual;
         private Rectangle _boundingBoxVisual;
+        private int _stickyFocusShapeId = -1;
+        private readonly Dictionary<string, int> _stickyGlobalFocusValues = new();
 
         // массив 
         private ShapeBase[] _allShapes = new ShapeBase[0];
@@ -88,7 +90,7 @@ namespace ShapeEditor
         private List<double?> _pendingEdgeLengths = new();
 
         private bool _isCreatingCustomShape = false;
-        private CustomShape _creatingCustomShape = null;
+        private PolygonShape _creatingCustomShape = null;
         private int _creatingNextIndex = 0;
 
         private TextBox _newSegmentLengthBox;
@@ -101,13 +103,13 @@ namespace ShapeEditor
         private UIElement _segmentHighlightContainer = null;
 
         // Поля для работы с комплексными фигурами
-        public CompoundShape _editingParentCompound = null; 
-        private ShapeBase _childShapeBeforeEdit = null;      
+        public CompoundShape _editingParentCompound = null;
+        private ShapeBase _childShapeBeforeEdit = null;
 
         private List<Canvas> _selectedVisuals = new();
 
 
-        private List<ShapeTreeItem> _treeRootItems = new();
+        private List<object> _treeRootItems = new();
 
         private const string FILE_EXTENSION = ".json";
         private const string FILE_FILTER = "JSON файлы (*.json)|*.json|Все файлы (*.*)|*.*";
@@ -218,7 +220,7 @@ namespace ShapeEditor
         private void AddCustomShape(object sender, RoutedEventArgs e)
         {
             // Начинаем интерактивное создание кастомной фигуры
-            var custom = new CustomShape();
+            var custom = new PolygonShape { IsCustomSegmentShape = true };
             custom.Scale = 1.0;
             custom.Angle = 0;
             custom.Fill = Brushes.Transparent;
@@ -229,7 +231,7 @@ namespace ShapeEditor
 
             var visual = CreateShapeVisual(custom, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
             DrawCanvas.Children.Add(visual);
-            AddShapeToArray(custom, visual); 
+            AddShapeToArray(custom, visual);
 
             // Ставим в режим создания
             _isCreatingCustomShape = true;
@@ -249,7 +251,7 @@ namespace ShapeEditor
 
             var visual = CreateShapeVisual(compound, DrawCanvas.ActualWidth / 2, DrawCanvas.ActualHeight / 2);
             DrawCanvas.Children.Add(visual);
-            AddShapeToArray(compound, visual); 
+            AddShapeToArray(compound, visual);
 
             SelectShape(visual);
             RefreshShapesTree();
@@ -290,8 +292,37 @@ namespace ShapeEditor
                 e.Handled = true;
             }
         }
+        //private void ClearSelection()
+        //{
+        //    if (_boundingBoxVisual != null)
+        //        DrawCanvas.Children.Remove(_boundingBoxVisual);
+
+        //    _boundingBoxVisual = null;
+        //    _selectedShapeVisual = null;
+        //    _currentShape = null;
+        //    _currentShapeVisual = null;
+
+        //    UpdateParamsPanelVisibility();
+        //}
         private void ClearSelection()
         {
+            // --- НОВЫЙ КОД: Скрываем якоря у текущей выделенной фигуры ---
+            if (_selectedShapeVisual != null)
+            {
+                foreach (UIElement child in _selectedShapeVisual.Children)
+                {
+                    if (child is Ellipse el)
+                    {
+                        string tag = el.Tag?.ToString();
+                        if (tag == "Anchor" || tag == "Focus1" || tag == "Focus2")
+                        {
+                            el.Visibility = Visibility.Collapsed;
+                        }
+                    }
+                }
+            }
+            // ----------------------------------------------------------
+
             if (_boundingBoxVisual != null)
                 DrawCanvas.Children.Remove(_boundingBoxVisual);
 
@@ -329,6 +360,21 @@ namespace ShapeEditor
             RefreshShapesTree();
         }
 
+        //private void SelectShape(Canvas shapeVisual)
+        //{
+        //    ClearSelection();
+
+        //    _selectedShapeVisual = shapeVisual;
+        //    _currentShape = shapeVisual.Tag as ShapeBase;
+        //    _currentShapeVisual = shapeVisual;
+
+        //    ShowBoundingBox(shapeVisual);
+        //    UpdateParamsPanelVisibility();
+
+        //    // Пересобираем панель параметров под новую фигуру
+        //    if (_paramsPanelIsOpen)
+        //        RebuildParamsPanel();
+        //}
         private void SelectShape(Canvas shapeVisual)
         {
             ClearSelection();
@@ -340,11 +386,26 @@ namespace ShapeEditor
             ShowBoundingBox(shapeVisual);
             UpdateParamsPanelVisibility();
 
-            // Пересобираем панель параметров под новую фигуру
+            // --- НОВЫЙ КОД: Показываем якоря и фокусы ---
+            if (shapeVisual != null)
+            {
+                foreach (UIElement child in shapeVisual.Children)
+                {
+                    if (child is Ellipse el)
+                    {
+                        string tag = el.Tag?.ToString();
+                        if (tag == "Anchor" || tag == "Focus1" || tag == "Focus2")
+                        {
+                            el.Visibility = Visibility.Visible;
+                        }
+                    }
+                }
+            }
+            // --------------------------------------------
+
             if (_paramsPanelIsOpen)
                 RebuildParamsPanel();
         }
-
         private void ShowBoundingBox(Canvas visual)
         {
             // 1. Сначала ВСЕГДА удаляем старую рамку
@@ -427,6 +488,19 @@ namespace ShapeEditor
             return canvas;
         }
 
+        /// <summary>
+        /// После замены канваса фигуры (Redraw) обновляет ссылки в множественном выделении,
+        /// иначе GroupSelected удалит модель по старому визуалу, а новый канвас останется на холсте.
+        /// </summary>
+        private void ReplaceCanvasInMultiSelection(Canvas oldCanvas, Canvas newCanvas)
+        {
+            if (oldCanvas == null || newCanvas == null) return;
+            for (int i = 0; i < _selectedVisuals.Count; i++)
+            {
+                if (ReferenceEquals(_selectedVisuals[i], oldCanvas))
+                    _selectedVisuals[i] = newCanvas;
+            }
+        }
 
         private void RedrawPreservingAnchor()
         {
@@ -437,6 +511,7 @@ namespace ShapeEditor
             if (_isEditingChildInPlace && _childNestedVisual != null)
             {
                 // 1. Запоминаем текущую мировую позицию и состояние (уникальные имена!)
+                var oldChildVisual = _childNestedVisual;
                 double childCurrentLeft = Canvas.GetLeft(_childNestedVisual);
                 double childCurrentTop = Canvas.GetTop(_childNestedVisual);
                 bool childWasSelected = (_selectedShapeVisual == _childNestedVisual);
@@ -470,6 +545,7 @@ namespace ShapeEditor
                 DrawCanvas.Children.Add(newChildVisual);
 
                 // 6. Обновляем ссылки (используем новые имена!)
+                ReplaceCanvasInMultiSelection(oldChildVisual, newChildVisual);
                 _childNestedVisual = newChildVisual;
                 _currentShapeVisual = newChildVisual;
                 if (childWasSelected) _selectedShapeVisual = newChildVisual;
@@ -482,12 +558,13 @@ namespace ShapeEditor
 
 
 
-            Point worldAnchor = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
-            bool wasSelected = (_selectedShapeVisual == _currentShapeVisual);
+            var oldVisual = _currentShapeVisual;
+            Point worldAnchor = _currentShape.GetAnchorWorldPosition(oldVisual);
+            bool wasSelected = (_selectedShapeVisual == oldVisual);
 
             // Удаляем старый Canvas (тот, который сейчас в _currentShapeVisual)
-            if (DrawCanvas.Children.Contains(_currentShapeVisual))
-                DrawCanvas.Children.Remove(_currentShapeVisual);
+            if (DrawCanvas.Children.Contains(oldVisual))
+                DrawCanvas.Children.Remove(oldVisual);
 
             if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
                 DrawCanvas.Children.Remove(_boundingBoxVisual);
@@ -499,19 +576,18 @@ namespace ShapeEditor
             // 🔴 ВАЖНО: обновляем ссылки
             // Заменяем ссылку на текущий визуал
             _currentShapeVisual = newVisual;
+            ReplaceCanvasInMultiSelection(oldVisual, newVisual);
 
-            // Если модель присутствует в списке всех фигур — обновляем соответствующий визуал в _allShapeVisuals
-            // В методе RedrawPreservingAnchor:
-            int idx = Array.IndexOf(_allShapes, _currentShape); // ИСПРАВЛЕНО
-
-            // В методе OnCloseCreatingShape:
-            int shapeIndex = Array.IndexOf(_allShapes, _creatingCustomShape); // ИСПРАВЛЕНО            if (idx >= 0)
-            _allShapeVisuals[idx] = newVisual;
+            int idx = Array.IndexOf(_allShapes, _currentShape);
+            if (idx >= 0)
+                _allShapeVisuals[idx] = newVisual;
 
             if (wasSelected)
             {
                 _selectedShapeVisual = newVisual;
                 ShowBoundingBox(newVisual);
+                SetServicePointsVisibility(newVisual, Visibility.Visible);
+
             }
 
             // 🔴 ВАЖНО: всегда обновляем панель
@@ -526,8 +602,8 @@ namespace ShapeEditor
             // Масштаб и угол
             if (_scaleSlider != null) _scaleSlider.Value = _currentShape.Scale;
             if (_scaleTextBox != null) _scaleTextBox.Text = _currentShape.Scale.ToString("0.00");
-            if (_angleSlider != null) _angleSlider.Value = _currentShape.Angle;
-            if (_angleTextBox != null) _angleTextBox.Text = ((int)_currentShape.Angle).ToString();
+            if (_angleSlider != null) _angleSlider.Value = -_currentShape.Angle;
+            if (_angleTextBox != null) _angleTextBox.Text = ((int)-_currentShape.Angle).ToString();
 
             // Обновление параметров эллипса
             if (_currentShape is EllipseShape ellipse)
@@ -535,7 +611,8 @@ namespace ShapeEditor
                 // Находим TextBox напрямую по Tag, без перебора StackPanel
                 foreach (var tb in FindTextBoxesByTag(_paramsStackPanel,
                     "MajorAxis", "MinorAxis", "FocalDistance", "FocusOffsetX",
-                    "GlobalFocus1X", "GlobalFocus1Y", "GlobalFocus2X", "GlobalFocus2Y"))
+                    "GlobalFocus1X", "GlobalFocus1Y", "GlobalFocus2X", "GlobalFocus2Y",
+                    "LocalFocus1X", "LocalFocus1Y", "LocalFocus2X", "LocalFocus2Y"))
                 {
                     if (tb.IsKeyboardFocused) continue; // Не трогаем то, что редактирует пользователь
 
@@ -559,14 +636,63 @@ namespace ShapeEditor
                         case "GlobalFocus2X":
                         case "GlobalFocus2Y":
                             {
-                                Point worldAnchor = ellipse.GetAnchorWorldPosition(_currentShapeVisual);
-                                var (f1, f2) = ellipse.GetGlobalFocusPositions(worldAnchor.X, worldAnchor.Y);
+                                Point centerWorld = GetEllipseCenterWorldFromCurrentVisual(ellipse);
+                                var (f1, f2) = ellipse.GetGlobalFocusPositions(centerWorld.X, centerWorld.Y);
+                                int computedValue = tag switch
+                                {
+                                    "GlobalFocus1X" => (int)Math.Round(f1.X),
+                                    "GlobalFocus1Y" => (int)Math.Round(f1.Y),
+                                    "GlobalFocus2X" => (int)Math.Round(f2.X),
+                                    "GlobalFocus2Y" => (int)Math.Round(f2.Y),
+                                    _ => 0
+                                };
+                                if (!_stickyGlobalFocusValues.ContainsKey(tag))
+                                    _stickyGlobalFocusValues[tag] = computedValue;
+                                tb.Text = _stickyGlobalFocusValues[tag].ToString("0");
+                            }
+                            break;
+                        case "LocalFocus1X":
+                        case "LocalFocus1Y":
+                        case "LocalFocus2X":
+                        case "LocalFocus2Y":
+                            {
+                                double c = ellipse.IsCircle ? 0 : ellipse.FocalDistance * ellipse.Scale;
+                                bool fociOnY = ellipse.FociOnYAxis;
+
+                                double f1cx = fociOnY ? 0 : -c;
+                                double f1cy = fociOnY ? -c : 0;
+                                double f2cx = fociOnY ? 0 : c;
+                                double f2cy = fociOnY ? c : 0;
+
+                                double acx = -ellipse.AnchorPoint.X * ellipse.Scale;
+                                double acy = -ellipse.AnchorPoint.Y * ellipse.Scale;
+
+                                double angleRad = ellipse.Angle * Math.PI / 180.0;
+                                double cos = Math.Cos(angleRad);
+                                double sin = Math.Sin(angleRad);
+
+                                double RotateX(double x, double y) => x * cos - y * sin;
+                                double RotateY(double x, double y) => x * sin + y * cos;
+
+                                double atcX = RotateX(acx, acy);
+                                double atcY = RotateY(acx, acy);
+
+                                double ctf1X = RotateX(f1cx, f1cy);
+                                double ctf1Y = RotateY(f1cx, f1cy);
+                                double ctf2X = RotateX(f2cx, f2cy);
+                                double ctf2Y = RotateY(f2cx, f2cy);
+
+                                double lf1x = atcX + ctf1X;
+                                double lf1y = atcY + ctf1Y;
+                                double lf2x = atcX + ctf2X;
+                                double lf2y = atcY + ctf2Y;
+
                                 tb.Text = tag switch
                                 {
-                                    "GlobalFocus1X" => f1.X.ToString("0"),
-                                    "GlobalFocus1Y" => f1.Y.ToString("0"),
-                                    "GlobalFocus2X" => f2.X.ToString("0"),
-                                    "GlobalFocus2Y" => f2.Y.ToString("0"),
+                                    "LocalFocus1X" => lf1x.ToString("0.0"),
+                                    "LocalFocus1Y" => lf1y.ToString("0.0"),
+                                    "LocalFocus2X" => lf2x.ToString("0.0"),
+                                    "LocalFocus2Y" => lf2y.ToString("0.0"),
                                     _ => tb.Text
                                 };
                             }
@@ -651,6 +777,19 @@ namespace ShapeEditor
                     }
                 }
             }
+        }
+
+        private Point GetEllipseCenterWorldFromCurrentVisual(EllipseShape ellipse)
+        {
+            Point anchorWorld = ellipse.GetAnchorWorldPosition(_currentShapeVisual);
+            double angleRad = ellipse.Angle * Math.PI / 180.0;
+            double cos = Math.Cos(angleRad);
+            double sin = Math.Sin(angleRad);
+            double ax = ellipse.AnchorPoint.X * ellipse.Scale;
+            double ay = ellipse.AnchorPoint.Y * ellipse.Scale;
+            double rotatedVecX = -ax * cos + ay * sin;
+            double rotatedVecY = -ax * sin - ay * cos;
+            return new Point(anchorWorld.X + rotatedVecX, anchorWorld.Y + rotatedVecY);
         }
 
         private void VertexLocalCoordinate_TextChanged(object sender, TextChangedEventArgs e)
@@ -742,6 +881,20 @@ namespace ShapeEditor
             _pendingEdgeLengths.Clear();
             _vertexWorldXBoxes.Clear(); // ← важно!
             _vertexWorldYBoxes.Clear(); // ← важно!
+
+            if (_currentShape is EllipseShape)
+            {
+                if (_stickyFocusShapeId != _currentShape.Id)
+                {
+                    _stickyGlobalFocusValues.Clear();
+                    _stickyFocusShapeId = _currentShape.Id;
+                }
+            }
+            else
+            {
+                _stickyGlobalFocusValues.Clear();
+                _stickyFocusShapeId = -1;
+            }
 
             bool isCircle = _currentShape is EllipseShape ellipseCheck && ellipseCheck.IsCircle; int sides = _currentShape.SidesCount;
             string[] names = _currentShape.SideNames ?? Array.Empty<string>();
@@ -844,7 +997,7 @@ namespace ShapeEditor
                 var majorRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
                 majorRow.Children.Add(new TextBlock
                 {
-                    Text = ellipse.FociOnYAxis ? "Малая ось (гориз.):" : "Большая ось:",
+                    Text = ellipse.FociOnYAxis ? "Гориз. ось:" : "Гориз. ось:",
                     Width = 110,
                     VerticalAlignment = VerticalAlignment.Center
                 });
@@ -881,9 +1034,11 @@ namespace ShapeEditor
 
                 // Малая полуось (MinorAxis)
                 var minorRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
+                minorRow.IsEnabled = !ellipse.IsCircle; // Блокирует строку, если это круг
+
                 minorRow.Children.Add(new TextBlock
                 {
-                    Text = ellipse.FociOnYAxis ? "Большая ось (верт.):" : "Малая ось:",
+                    Text = ellipse.FociOnYAxis ? "Верт. ось:" : "Верт. ось:",
                     Width = 110,
                     VerticalAlignment = VerticalAlignment.Center
                 });
@@ -922,6 +1077,8 @@ namespace ShapeEditor
 
                 // Фокусное расстояние (c) — доступно всегда, даже для круга
                 var focalRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
+                focalRow.IsEnabled = !ellipse.IsCircle; // Блокирует строку, если это круг
+
                 focalRow.Children.Add(new TextBlock
                 {
                     Text = ellipse.FociOnYAxis ? "Фокус (c, по Y):" : "Фокус (c, по X):",
@@ -976,67 +1133,120 @@ namespace ShapeEditor
                 _paramsStackPanel.Children.Add(focalRow);
 
                 // Глобальные координаты фокусов (только чтение)
+                // MainWindow.xaml.cs внутри RebuildParamsPanel (секция эллипса)
+
                 if (!ellipse.IsCircle)
                 {
-                    Point worldAnchor = ellipse.GetAnchorWorldPosition(_currentShapeVisual);
-                    var (f1, f2) = ellipse.GetGlobalFocusPositions(worldAnchor.X, worldAnchor.Y);
+                    Point centerWorld = GetEllipseCenterWorldFromCurrentVisual(ellipse);
+                    var (f1, f2) = ellipse.GetGlobalFocusPositions(centerWorld.X, centerWorld.Y);
+                    int gf1xVal = _stickyGlobalFocusValues.TryGetValue("GlobalFocus1X", out var s11) ? s11 : (int)Math.Round(f1.X);
+                    int gf1yVal = _stickyGlobalFocusValues.TryGetValue("GlobalFocus1Y", out var s12) ? s12 : (int)Math.Round(f1.Y);
+                    int gf2xVal = _stickyGlobalFocusValues.TryGetValue("GlobalFocus2X", out var s21) ? s21 : (int)Math.Round(f2.X);
+                    int gf2yVal = _stickyGlobalFocusValues.TryGetValue("GlobalFocus2Y", out var s22) ? s22 : (int)Math.Round(f2.Y);
+                    _stickyGlobalFocusValues["GlobalFocus1X"] = gf1xVal;
+                    _stickyGlobalFocusValues["GlobalFocus1Y"] = gf1yVal;
+                    _stickyGlobalFocusValues["GlobalFocus2X"] = gf2xVal;
+                    _stickyGlobalFocusValues["GlobalFocus2Y"] = gf2yVal;
 
+                    // Фокус 1
                     var globalF1Row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 2) };
-                    globalF1Row.Children.Add(new TextBlock
+                    globalF1Row.Children.Add(new TextBlock { Text = "Фокус 1 (глоб.):", Width = 110, VerticalAlignment = VerticalAlignment.Center });
+                    var gf1x = new TextBox { Width = 55, Text = gf1xVal.ToString("0"), Tag = "GlobalFocus1X" };
+                    var gf1y = new TextBox { Width = 55, Text = gf1yVal.ToString("0"), Tag = "GlobalFocus1Y" };
+
+                    // Фокус 2
+                    var globalF2Row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 4) };
+                    globalF2Row.Children.Add(new TextBlock { Text = "Фокус 2 (глоб.):", Width = 110, VerticalAlignment = VerticalAlignment.Center });
+                    var gf2x = new TextBox { Width = 55, Text = gf2xVal.ToString("0"), Tag = "GlobalFocus2X" };
+                    var gf2y = new TextBox { Width = 55, Text = gf2yVal.ToString("0"), Tag = "GlobalFocus2Y" };
+
+                    // Подписываем на Enter и потерю фокуса
+                    foreach (var tb in new[] { gf1x, gf1y, gf2x, gf2y })
                     {
-                        Text = "Фокус 1 (глоб.):",
-                        Width = 110,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Foreground = Brushes.Gray
-                    });
-                    var gf1x = new TextBox { Width = 55, Text = f1.X.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "GlobalFocus1X" };
-                    var gf1y = new TextBox { Width = 55, Text = f1.Y.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "GlobalFocus1Y" };
+                        tb.LostFocus += (s, ev) => ApplyGlobalFocusChange();
+                        tb.KeyDown += (s, ev) => { if (ev.Key == Key.Enter) ApplyGlobalFocusChange(); };
+                    }
+
                     globalF1Row.Children.Add(gf1x);
-                    globalF1Row.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray });
+                    globalF1Row.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0) });
                     globalF1Row.Children.Add(gf1y);
                     _paramsStackPanel.Children.Add(globalF1Row);
 
-                    var globalF2Row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 4) };
-                    globalF2Row.Children.Add(new TextBlock
-                    {
-                        Text = "Фокус 2 (глоб.):",
-                        Width = 110,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Foreground = Brushes.Gray
-                    });
-                    var gf2x = new TextBox { Width = 55, Text = f2.X.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "GlobalFocus2X" };
-                    var gf2y = new TextBox { Width = 55, Text = f2.Y.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "GlobalFocus2Y" };
                     globalF2Row.Children.Add(gf2x);
-                    globalF2Row.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray });
+                    globalF2Row.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0) });
                     globalF2Row.Children.Add(gf2y);
                     _paramsStackPanel.Children.Add(globalF2Row);
                 }
-                else
+
                 {
-                    // Для круга — показываем глобальные координаты центра
-                    var center = ellipse.GetAnchorWorldPosition(_currentShapeVisual);
-                    var globalFRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
-                    globalFRow.Children.Add(new TextBlock
+                    double c = ellipse.IsCircle ? 0 : ellipse.FocalDistance * ellipse.Scale;
+                    bool fociOnY = ellipse.FociOnYAxis;
+
+                    // Вектор от ЦЕНТРА эллипса к фокусу в локальных осях (до поворота)
+                    double f1cx = fociOnY ? 0 : -c;
+                    double f1cy = fociOnY ? -c : 0;
+                    double f2cx = fociOnY ? 0 : c;
+                    double f2cy = fociOnY ? c : 0;
+
+                    // Вектор от ЯКОРЯ к ЦЕНТРУ эллипса в локальных осях (до поворота)
+                    double acx = -ellipse.AnchorPoint.X * ellipse.Scale;
+                    double acy = -ellipse.AnchorPoint.Y * ellipse.Scale;
+
+                    // Угол поворота фигуры
+                    double angleRad = ellipse.Angle * Math.PI / 180.0;
+                    double cos = Math.Cos(angleRad);
+                    double sin = Math.Sin(angleRad);
+
+                    // Функция поворота вектора (x,y) на угол Angle
+                    Point Rotate(double x, double y) => new Point(x * cos - y * sin, x * sin + y * cos);
+
+                    // Вектор якорь→центр, повёрнутый
+                    var anchorToCenter = Rotate(acx, acy);
+
+                    // Вектор центр→фокус1, повёрнутый
+                    var centerToF1 = Rotate(f1cx, f1cy);
+                    var centerToF2 = Rotate(f2cx, f2cy);
+
+                    // Итоговый вектор якорь→фокус (в мировых осях, но относительно якоря)
+                    var f1Local = new Point(anchorToCenter.X + centerToF1.X, anchorToCenter.Y + centerToF1.Y);
+                    var f2Local = new Point(anchorToCenter.X + centerToF2.X, anchorToCenter.Y + centerToF2.Y);
+
+                    var localF1Row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 2) };
+                    localF1Row.Children.Add(new TextBlock
                     {
-                        Text = "Центр (глоб.):",
+                        Text = "Фокус 1 (от якоря):",
                         Width = 110,
                         VerticalAlignment = VerticalAlignment.Center,
                         Foreground = Brushes.Gray
                     });
-                    var gcx = new TextBox { Width = 55, Text = center.X.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray };
-                    var gcy = new TextBox { Width = 55, Text = center.Y.ToString("0"), IsReadOnly = true, Foreground = Brushes.Gray };
-                    globalFRow.Children.Add(gcx);
-                    globalFRow.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray });
-                    globalFRow.Children.Add(gcy);
-                    _paramsStackPanel.Children.Add(globalFRow);
-                }
+                    var lf1x = new TextBox { Width = 55, Text = f1Local.X.ToString("0.0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "LocalFocus1X" };
+                    var lf1y = new TextBox { Width = 55, Text = f1Local.Y.ToString("0.0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "LocalFocus1Y" };
+                    localF1Row.Children.Add(lf1x);
+                    localF1Row.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray });
+                    localF1Row.Children.Add(lf1y);
+                    _paramsStackPanel.Children.Add(localF1Row);
 
+                    var localF2Row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 4) };
+                    localF2Row.Children.Add(new TextBlock
+                    {
+                        Text = "Фокус 2 (от якоря):",
+                        Width = 110,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Foreground = Brushes.Gray
+                    });
+                    var lf2x = new TextBox { Width = 55, Text = f2Local.X.ToString("0.0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "LocalFocus2X" };
+                    var lf2y = new TextBox { Width = 55, Text = f2Local.Y.ToString("0.0"), IsReadOnly = true, Foreground = Brushes.Gray, Tag = "LocalFocus2Y" };
+                    localF2Row.Children.Add(lf2x);
+                    localF2Row.Children.Add(new TextBlock { Text = ",", Margin = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray });
+                    localF2Row.Children.Add(lf2y);
+                    _paramsStackPanel.Children.Add(localF2Row);
+                }
                 // Разделитель
                 _paramsStackPanel.Children.Add(new Separator { Margin = new Thickness(0, 8, 0, 8) });
             }
 
             // Для кастомных фигур — добавляем углы между отрезками
-            if (_currentShape is CustomShape customShape)
+            if (_currentShape is PolygonShape customShape && customShape.IsCustomSegmentShape)
             {
                 _paramsStackPanel.Children.Add(new TextBlock
                 {
@@ -1123,7 +1333,7 @@ namespace ShapeEditor
             }
 
             // Добавлено: блок для режима создания кастомной фигуры
-            if (_currentShape is CustomShape sc && _isCreatingCustomShape && sc == _creatingCustomShape)
+            if (_currentShape is PolygonShape sc && sc.IsCustomSegmentShape && _isCreatingCustomShape && sc == _creatingCustomShape)
             {
                 _paramsStackPanel.Children.Add(new TextBlock
                 {
@@ -1597,11 +1807,11 @@ namespace ShapeEditor
                 Width = 50,
                 Margin = new Thickness(6, 0, 4, 0),
                 Text = world.X.ToString("0"),
-                IsReadOnly = false,                   
-                Background = Brushes.White,               
+                IsReadOnly = false,
+                Background = Brushes.White,
                 BorderBrush = Brushes.Gray
             };
-            _worldAnchorXBox.TextChanged += WorldAnchorX_TextChanged;   
+            _worldAnchorXBox.TextChanged += WorldAnchorX_TextChanged;
 
             _worldAnchorYBox = new TextBox
             {
@@ -1612,7 +1822,7 @@ namespace ShapeEditor
                 Background = Brushes.White,
                 BorderBrush = Brushes.Gray
             };
-            _worldAnchorYBox.TextChanged += WorldAnchorY_TextChanged;   
+            _worldAnchorYBox.TextChanged += WorldAnchorY_TextChanged;
 
 
             worldRow.Children.Add(_worldAnchorXBox);
@@ -1623,55 +1833,55 @@ namespace ShapeEditor
             // Масштаб и угол — уменьшенные горизонтальные отступы
             _paramsStackPanel.Children.Add(new TextBlock
             {
-                Text = "Масштаб и поворот",
+                Text = "Поворот",
                 FontWeight = FontWeights.Bold,
                 Margin = new Thickness(0, 8, 0, 6)
             });
 
             // Масштаб
-            var scalePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
-            scalePanel.Children.Add(new TextBlock { Text = "Масштаб", Margin = new Thickness(0, 0, 0, 2) });
+            //var scalePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            //scalePanel.Children.Add(new TextBlock { Text = "Масштаб", Margin = new Thickness(0, 0, 0, 2) });
 
-            var scaleGrid = new Grid();
-            scaleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            scaleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            //var scaleGrid = new Grid();
+            //scaleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            //scaleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            _scaleSlider = new Slider
-            {
-                Minimum = 0.1,
-                Maximum = 30,
-                Value = _currentShape.Scale
-            };
-            _scaleSlider.ValueChanged += (s, ev) =>
-            {
-                _currentShape.Scale = ev.NewValue;
-                if (_scaleTextBox != null) _scaleTextBox.Text = ev.NewValue.ToString("0.00");
-                RedrawPreservingAnchor();
-            };
+            //_scaleSlider = new Slider
+            //{
+            //    Minimum = 0.1,
+            //    Maximum = 30,
+            //    Value = _currentShape.Scale
+            //};
+            //_scaleSlider.ValueChanged += (s, ev) =>
+            //{
+            //    _currentShape.Scale = ev.NewValue;
+            //    if (_scaleTextBox != null) _scaleTextBox.Text = ev.NewValue.ToString("0.00");
+            //    RedrawPreservingAnchor();
+            //};
 
-            _scaleTextBox = new TextBox
-            {
-                Width = 30,
-                Margin = new Thickness(6, 0, 0, 0),          // ← здесь главное уменьшение: было 12 → стало 8
-                Text = _currentShape.Scale.ToString("0.00"),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            _scaleTextBox.TextChanged += (s, ev) =>
-            {
-                if (double.TryParse(_scaleTextBox.Text, out var v) && v >= 0.1 && v <= 30)
-                {
-                    _currentShape.Scale = v;
-                    if (_scaleSlider != null) _scaleSlider.Value = v;
-                    RedrawPreservingAnchor();
-                }
-            };
+            //_scaleTextBox = new TextBox
+            //{
+            //    Width = 30,
+            //    Margin = new Thickness(6, 0, 0, 0),          // ← здесь главное уменьшение: было 12 → стало 8
+            //    Text = _currentShape.Scale.ToString("0.00"),
+            //    VerticalAlignment = VerticalAlignment.Center
+            //};
+            //_scaleTextBox.TextChanged += (s, ev) =>
+            //{
+            //    if (double.TryParse(_scaleTextBox.Text, out var v) && v >= 0.1 && v <= 30)
+            //    {
+            //        _currentShape.Scale = v;
+            //        if (_scaleSlider != null) _scaleSlider.Value = v;
+            //        RedrawPreservingAnchor();
+            //    }
+            //};
 
-            Grid.SetColumn(_scaleSlider, 0);
-            Grid.SetColumn(_scaleTextBox, 1);
-            scaleGrid.Children.Add(_scaleSlider);
-            scaleGrid.Children.Add(_scaleTextBox);
-            scalePanel.Children.Add(scaleGrid);
-            _paramsStackPanel.Children.Add(scalePanel);
+            //Grid.SetColumn(_scaleSlider, 0);
+            //Grid.SetColumn(_scaleTextBox, 1);
+            //scaleGrid.Children.Add(_scaleSlider);
+            //scaleGrid.Children.Add(_scaleTextBox);
+            //scalePanel.Children.Add(scaleGrid);
+            //_paramsStackPanel.Children.Add(scalePanel);
 
             // Угол
             var anglePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 0) };
@@ -1685,12 +1895,12 @@ namespace ShapeEditor
             {
                 Minimum = -180,
                 Maximum = 180,
-                Value = _currentShape.Angle,
+                Value = -_currentShape.Angle, // ИНВЕРСИЯ: показываем пользователю -Angle
                 TickFrequency = 15
             };
             _angleSlider.ValueChanged += (s, ev) =>
             {
-                _currentShape.Angle = ev.NewValue;
+                _currentShape.Angle = -ev.NewValue; // ИНВЕРСИЯ: записываем в модель -Value
 
                 if (_angleTextBox != null)
                     _angleTextBox.Text = ((int)ev.NewValue).ToString();
@@ -1698,21 +1908,21 @@ namespace ShapeEditor
                 RedrawPreservingAnchor();
 
                 if (_paramsPanelIsOpen)
-                    RefreshParamsPanelValues();   
+                    RefreshParamsPanelValues();
             };
 
             _angleTextBox = new TextBox
             {
                 Width = 30,
-                Margin = new Thickness(6, 0, 0, 0),         
-                Text = ((int)_currentShape.Angle).ToString(),
+                Margin = new Thickness(6, 0, 0, 0),
+                Text = ((int)-_currentShape.Angle).ToString(), // ИНВЕРСИЯ: показываем -Angle
                 VerticalAlignment = VerticalAlignment.Center
             };
             _angleTextBox.TextChanged += (s, ev) =>
             {
                 if (double.TryParse(_angleTextBox.Text, out var v))
                 {
-                    _currentShape.Angle = v;
+                    _currentShape.Angle = -v; // ИНВЕРСИЯ: записываем в модель -v
 
                     if (_angleSlider != null)
                         _angleSlider.Value = v;
@@ -1720,7 +1930,7 @@ namespace ShapeEditor
                     RedrawPreservingAnchor();
 
                     if (_paramsPanelIsOpen)
-                        RefreshParamsPanelValues(); 
+                        RefreshParamsPanelValues();
                 }
             };
 
@@ -1816,8 +2026,8 @@ namespace ShapeEditor
                 if (idx < _colorTextBoxes.Count)
                     _colorTextBoxes[idx].Text = GetColorHex(brush);
 
-                // если это CustomShape — синхронизируем цвет сегмента
-                if (_currentShape is CustomShape cs && idx < cs.Segments.Count)
+                // если это CustomShape-like polygon — синхронизируем цвет сегмента
+                if (_currentShape is PolygonShape cs && cs.IsCustomSegmentShape && idx < cs.Segments.Count)
                     cs.Segments[idx].Color = brush;
 
                 RedrawPreservingAnchor();
@@ -1855,8 +2065,8 @@ namespace ShapeEditor
                     _currentShape.SideThickness.Add(3);
                 _currentShape.SideThickness[idx] = v;
 
-                // синхронизация для CustomShape
-                if (_currentShape is CustomShape cs && idx < cs.Segments.Count)
+                // синхронизация для CustomShape-like polygon
+                if (_currentShape is PolygonShape cs && cs.IsCustomSegmentShape && idx < cs.Segments.Count)
                     cs.Segments[idx].Thickness = v;
 
                 RedrawPreservingAnchor();
@@ -2280,10 +2490,11 @@ namespace ShapeEditor
         }
         private void RedrawAtPoint(Point worldPoint)
         {
-            bool wasSelected = (_selectedShapeVisual == _currentShapeVisual);
+            var oldVisual = _currentShapeVisual;
+            bool wasSelected = (_selectedShapeVisual == oldVisual);
 
-            if (DrawCanvas.Children.Contains(_currentShapeVisual))
-                DrawCanvas.Children.Remove(_currentShapeVisual);
+            if (DrawCanvas.Children.Contains(oldVisual))
+                DrawCanvas.Children.Remove(oldVisual);
 
             if (_boundingBoxVisual != null && DrawCanvas.Children.Contains(_boundingBoxVisual))
                 DrawCanvas.Children.Remove(_boundingBoxVisual);
@@ -2291,6 +2502,7 @@ namespace ShapeEditor
             // Создаем новый визуал. Точка привязки будет точно под курсором.
             _currentShapeVisual = CreateShapeVisual(_currentShape, worldPoint.X, worldPoint.Y);
             DrawCanvas.Children.Add(_currentShapeVisual);
+            ReplaceCanvasInMultiSelection(oldVisual, _currentShapeVisual);
 
             int idx = Array.IndexOf(_allShapes, _currentShape);
             if (idx >= 0) _allShapeVisuals[idx] = _currentShapeVisual;
@@ -2299,6 +2511,10 @@ namespace ShapeEditor
             {
                 _selectedShapeVisual = _currentShapeVisual;
                 ShowBoundingBox(_currentShapeVisual);
+
+                // --- ДОБАВИТЬ ЭТО ---
+                SetServicePointsVisibility(_currentShapeVisual, Visibility.Visible);
+
             }
 
             if (_paramsPanelIsOpen) RefreshParamsPanelValues();
@@ -2311,6 +2527,105 @@ namespace ShapeEditor
                     ellipse.CaptureMouse();
                     break;
                 }
+            }
+        }
+
+        // MainWindow.xaml.cs
+
+        // MainWindow.xaml.cs
+
+        // MainWindow.xaml.cs
+
+        private void ApplyGlobalFocusChange()
+        {
+            if (_currentShape is not EllipseShape ellipse || _currentShapeVisual == null) return;
+
+            // 1. Получаем ТЕКУЩИЕ мировые координаты фокусов прямо сейчас на холсте
+            Point centerWorld = GetEllipseCenterWorldFromCurrentVisual(ellipse);
+            var (f1Current, f2Current) = ellipse.GetGlobalFocusPositions(centerWorld.X, centerWorld.Y);
+
+            var tbs = FindTextBoxesByTag(_paramsStackPanel,
+                "GlobalFocus1X", "GlobalFocus1Y", "GlobalFocus2X", "GlobalFocus2Y").ToList();
+
+            if (tbs.Count < 4) return;
+
+            try
+            {
+                // 2. Считываем значения. Если в поле пусто или ошибка — берем текущую координату из мира.
+                bool TryParseUserInt(string text, out int value)
+                {
+                    return int.TryParse(text, NumberStyles.Integer, CultureInfo.CurrentCulture, out value) ||
+                           int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+                }
+
+                // Parse user-entered integer coordinates exactly as entered.
+                // Fallback keeps full-precision current geometry (no integer snapping).
+                double f1x = TryParseUserInt(tbs.First(t => t.Tag.ToString() == "GlobalFocus1X").Text, out var v1) ? v1 : f1Current.X;
+                double f1y = TryParseUserInt(tbs.First(t => t.Tag.ToString() == "GlobalFocus1Y").Text, out var v2) ? v2 : f1Current.Y;
+                double f2x = TryParseUserInt(tbs.First(t => t.Tag.ToString() == "GlobalFocus2X").Text, out var v3) ? v3 : f2Current.X;
+                double f2y = TryParseUserInt(tbs.First(t => t.Tag.ToString() == "GlobalFocus2Y").Text, out var v4) ? v4 : f2Current.Y;
+                _stickyGlobalFocusValues["GlobalFocus1X"] = (int)Math.Round(f1x);
+                _stickyGlobalFocusValues["GlobalFocus1Y"] = (int)Math.Round(f1y);
+                _stickyGlobalFocusValues["GlobalFocus2X"] = (int)Math.Round(f2x);
+                _stickyGlobalFocusValues["GlobalFocus2Y"] = (int)Math.Round(f2y);
+
+                // If user did not change any focus coordinate, do not recompute geometry.
+                const double eps = 1e-6;
+                bool unchanged =
+                    Math.Abs(f1x - f1Current.X) < eps &&
+                    Math.Abs(f1y - f1Current.Y) < eps &&
+                    Math.Abs(f2x - f2Current.X) < eps &&
+                    Math.Abs(f2y - f2Current.Y) < eps;
+
+                if (unchanged)
+                {
+                    foreach (var tb in tbs)
+                    {
+                        string tag = tb.Tag?.ToString();
+                        tb.Text = tag switch
+                        {
+                            "GlobalFocus1X" => _stickyGlobalFocusValues["GlobalFocus1X"].ToString("0"),
+                            "GlobalFocus1Y" => _stickyGlobalFocusValues["GlobalFocus1Y"].ToString("0"),
+                            "GlobalFocus2X" => _stickyGlobalFocusValues["GlobalFocus2X"].ToString("0"),
+                            "GlobalFocus2Y" => _stickyGlobalFocusValues["GlobalFocus2Y"].ToString("0"),
+                            _ => tb.Text
+                        };
+                    }
+                    return;
+                }
+
+                Point newF1W = new Point(f1x, f1y);
+                Point newF2W = new Point(f2x, f2y);
+
+                // 3. Вызываем математику пересчета в EllipseShape
+                // Она вернет нам НОВУЮ точку мирового центра
+                Point newCenterW = ellipse.UpdateFromWorldFociFixedCenter(newF1W, newF2W);
+
+                // 4. Перерисовываем визуал в этой новой мировой точке
+                RedrawAtPoint(newCenterW);
+
+                // 5. Включаем видимость сервисных точек (чтобы не пропадали)
+                SetServicePointsVisibility(_currentShapeVisual, Visibility.Visible);
+
+                // Keep entered values sticky in the edit fields right after apply.
+                foreach (var tb in tbs)
+                {
+                    string tag = tb.Tag?.ToString();
+                    tb.Text = tag switch
+                    {
+                        "GlobalFocus1X" => _stickyGlobalFocusValues["GlobalFocus1X"].ToString("0"),
+                        "GlobalFocus1Y" => _stickyGlobalFocusValues["GlobalFocus1Y"].ToString("0"),
+                        "GlobalFocus2X" => _stickyGlobalFocusValues["GlobalFocus2X"].ToString("0"),
+                        "GlobalFocus2Y" => _stickyGlobalFocusValues["GlobalFocus2Y"].ToString("0"),
+                        _ => tb.Text
+                    };
+                }
+
+                RefreshParamsPanelValues();
+            }
+            catch
+            {
+                RefreshParamsPanelValues();
             }
         }
         //private void RedrawPreservingAnchorWithMouseCapture()
@@ -2628,28 +2943,28 @@ namespace ShapeEditor
             RefreshShapesTree();
         }
 
-private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
-{
-    if (!_isCreatingCustomShape || _creatingCustomShape == null) return;
+        private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
+        {
+            if (!_isCreatingCustomShape || _creatingCustomShape == null) return;
 
-    // 1. Сначала находим визуал, чтобы удалить его с экрана
-    int idx = Array.IndexOf(_allShapes, _creatingCustomShape);
-    if (idx >= 0)
-    {
-        var visual = _allShapeVisuals[idx];
-        if (DrawCanvas.Children.Contains(visual)) 
-            DrawCanvas.Children.Remove(visual);
-    }
+            // 1. Сначала находим визуал, чтобы удалить его с экрана
+            int idx = Array.IndexOf(_allShapes, _creatingCustomShape);
+            if (idx >= 0)
+            {
+                var visual = _allShapeVisuals[idx];
+                if (DrawCanvas.Children.Contains(visual))
+                    DrawCanvas.Children.Remove(visual);
+            }
 
-    // 2. Удаляем саму модель из массивов (ИСПРАВЛЕНО: используем наш метод вместо RemoveAt)
-    RemoveShapeFromArray(_creatingCustomShape);
+            // 2. Удаляем саму модель из массивов (ИСПРАВЛЕНО: используем наш метод вместо RemoveAt)
+            RemoveShapeFromArray(_creatingCustomShape);
 
-    _isCreatingCustomShape = false;
-    _creatingCustomShape = null;
-    ClearCustomCreationState();
-    ClearSelection();
-    RefreshShapesTree();
-}
+            _isCreatingCustomShape = false;
+            _creatingCustomShape = null;
+            ClearCustomCreationState();
+            ClearSelection();
+            RefreshShapesTree();
+        }
         private void UpdateCustomSegmentHighlight(params int[] indices)
         {
             // Удаляем старую подсветку
@@ -2658,7 +2973,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             _segmentHighlightContainer = null;
 
             if (_currentShape == null || _currentShapeVisual == null) return;
-            if (!(_currentShape is CustomShape cs)) return;
+            if (!(_currentShape is PolygonShape cs) || !cs.IsCustomSegmentShape) return;
 
             // контейнер для оверлеев
             var container = new Canvas { IsHitTestVisible = false };
@@ -2806,7 +3121,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
 
         private void ApplyAngleChange(int segmentIndex, string inputText)
         {
-            if (_currentShape is not CustomShape customShape) return;
+            if (_currentShape is not PolygonShape customShape || !customShape.IsCustomSegmentShape) return;
             if (segmentIndex < 0 || segmentIndex >= customShape.Segments.Count) return;
 
             if (double.TryParse(inputText, out double newAngle))
@@ -2841,7 +3156,9 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             {
                 if (child.Children.Count >= 2 && child.Children[1] is TextBox tb && tb.Tag is int idx && idx == segmentIndex)
                 {
-                    double currentAngle = ((CustomShape)_currentShape).GetEdgeAngle(segmentIndex);
+                    double currentAngle = (_currentShape is PolygonShape ps && ps.IsCustomSegmentShape)
+                        ? ps.GetEdgeAngle(segmentIndex)
+                        : 0;
                     tb.Text = currentAngle.ToString("0.0");
                     break;
                 }
@@ -3039,26 +3356,26 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                     foreach (var child in nestedCompound.ChildShapes.ToList())
                     {
                         Point childWorld = GetChildWorldPosition(nestedCompound, vis, child);
-                        child.AnchorPoint = new Point(
+                        compound.AddChildShape(child);
+                        compound.ChildAnchorOffsets[child.Id] = new Point(
                             childWorld.X - groupWorldAnchor.X,
                             childWorld.Y - groupWorldAnchor.Y
                         );
-                        compound.AddChildShape(child);
                     }
 
                     nestedCompound.ChildShapes.Clear();
+                    nestedCompound.ChildAnchorOffsets.Clear();
                     DrawCanvas.Children.Remove(vis);
                     RemoveShapeFromArray(nestedCompound);
                 }
                 else
                 {
                     Point childWorldPos = shape.GetAnchorWorldPosition(vis);
-                    shape.AnchorPoint = new Point(
+                    compound.AddChildShape(shape);
+                    compound.ChildAnchorOffsets[shape.Id] = new Point(
                         childWorldPos.X - groupWorldAnchor.X,
                         childWorldPos.Y - groupWorldAnchor.Y
                     );
-
-                    compound.AddChildShape(shape);
                     DrawCanvas.Children.Remove(vis);
                     RemoveShapeFromArray(shape);
                 }
@@ -3098,15 +3415,12 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                 double cos = Math.Cos(angleRad);
                 double sin = Math.Sin(angleRad);
 
-                double lx = child.AnchorPoint.X * compound.Scale;
-                double ly = child.AnchorPoint.Y * compound.Scale;
+                Point childOffset = compound.GetChildAnchorOffsetOrFallback(child);
+                double lx = childOffset.X * compound.Scale;
+                double ly = childOffset.Y * compound.Scale;
 
                 double worldX = groupWorldPos.X + (lx * cos - ly * sin);
                 double worldY = groupWorldPos.Y + (lx * sin + ly * cos);
-
-                child.AnchorPoint = new Point(0, 0);
-                child.Scale *= compound.Scale;
-                child.Angle += compound.Angle;
 
                 // Теперь Build() выполнится корректно, так как родителя больше нет в массивах, 
                 // а _currentShape == null
@@ -3125,8 +3439,9 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             double rad = parent.Angle * Math.PI / 180.0;
             double cos = Math.Cos(rad), sin = Math.Sin(rad);
 
-            double lx = child.AnchorPoint.X * parent.Scale;
-            double ly = child.AnchorPoint.Y * parent.Scale;
+            Point childOffset = parent.GetChildAnchorOffsetOrFallback(child);
+            double lx = childOffset.X * parent.Scale;
+            double ly = childOffset.Y * parent.Scale;
             double rx = lx * cos - ly * sin;
             double ry = lx * sin + ly * cos;
 
@@ -3307,34 +3622,34 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
 
 
 
-        private void RefreshShapesTree()
-        {
-            _treeRootItems.Clear();
+        //private void RefreshShapesTree()
+        //{
+        //    _treeRootItems.Clear();
 
-            foreach (var shape in _allShapes)
-            {
-                var item = new ShapeTreeItem(shape);
-                if (shape is CompoundShape compound)
-                {
-                    foreach (var child in compound.ChildShapes)
-                    {
-                        item.Children.Add(new ShapeTreeItem(child));
-                    }
-                }
-                _treeRootItems.Add(item);
-            }
+        //    foreach (var shape in _allShapes)
+        //    {
+        //        var item = new ShapeTreeItem(shape);
+        //        if (shape is CompoundShape compound)
+        //        {
+        //            foreach (var child in compound.ChildShapes)
+        //            {
+        //                item.Children.Add(new ShapeTreeItem(child));
+        //            }
+        //        }
+        //        _treeRootItems.Add(item);
+        //    }
 
-            ShapesTreeView.ItemsSource = null;
-            ShapesTreeView.ItemsSource = _treeRootItems;
-        }
+        //    ShapesTreeView.ItemsSource = null;
+        //    ShapesTreeView.ItemsSource = _treeRootItems;
+        //}
 
-        private void ShapesTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
-        {
-            if (e.NewValue is not ShapeTreeItem treeItem || treeItem.Shape == null)
-                return;
+        //private void ShapesTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+        //{
+        //    if (e.NewValue is not ShapeTreeItem treeItem || treeItem.Shape == null)
+        //        return;
 
-            HighlightShapeOnCanvas(treeItem.Shape);
-        }
+        //    HighlightShapeOnCanvas(treeItem.Shape);
+        //}
 
         private void HighlightShapeOnCanvas(ShapeBase shape)
         {
@@ -3545,38 +3860,147 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
 
         /// <summary>
         /// Сохраняет фигуру в JSON и добавляет worldX/worldY в тот же объект.
+        /// Для эллипсов/кругов дополнительно записывает смещения фокусов от якоря в мировых осях холста (focusWorld).
         /// </summary>
         private void SaveShapeWithWorldPosition(Utf8JsonWriter writer, ShapeBase shape, Point worldPos)
         {
-            // Используем MemoryStream для захвата вывода SaveToJson
+            var visual = _allShapeVisuals[Array.IndexOf(_allShapes, shape)];
             using var ms = new System.IO.MemoryStream();
             using var tempWriter = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = false });
             shape.SaveToJson(tempWriter);
             tempWriter.Flush();
 
-            string json = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+            string json = Encoding.UTF8.GetString(ms.ToArray());
             using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
+            WriteShapeJsonWithPersistedFocusWorld(writer, doc.RootElement, shape, worldPos, visual, appendAnchorWorld: true);
+        }
 
-            // Переписываем объект, добавляя worldX/worldY
+        /// <summary>
+        /// Дополняет JSON фигуры полями worldX/worldY (опционально) и focusWorld для эллипса
+        /// (координаты фокусов относительно точки привязки в мировой системе холста).
+        /// Рекурсивно обрабатывает childShapes у групп, сопоставляя детей с визуалами по Tag.
+        /// </summary>
+        private static void WriteShapeJsonWithPersistedFocusWorld(
+            Utf8JsonWriter writer,
+            JsonElement savedRoot,
+            ShapeBase shape,
+            Point anchorWorld,
+            Canvas visual,
+            bool appendAnchorWorld)
+        {
             writer.WriteStartObject();
-            foreach (var prop in root.EnumerateObject())
+            foreach (var prop in savedRoot.EnumerateObject())
             {
-                prop.WriteTo(writer);
+                if (shape is CompoundShape compound
+                    && prop.Name == "childShapes"
+                    && visual != null)
+                {
+                    writer.WritePropertyName("childShapes");
+                    writer.WriteStartArray();
+                    int i = 0;
+                    foreach (var childEl in prop.Value.EnumerateArray())
+                    {
+                        if (i >= compound.ChildShapes.Count)
+                        {
+                            childEl.WriteTo(writer);
+                            i++;
+                            continue;
+                        }
+
+                        var childShape = compound.ChildShapes[i];
+                        Canvas childVisual = FindChildShapeCanvas(visual, childShape);
+                        Point childAnchorWorld = childVisual != null
+                            ? childShape.GetAnchorWorldPosition(childVisual)
+                            : new Point(0, 0);
+
+                        WriteShapeJsonWithPersistedFocusWorld(writer, childEl, childShape, childAnchorWorld, childVisual, appendAnchorWorld: false);
+                        i++;
+                    }
+                    writer.WriteEndArray();
+                }
+                else
+                    prop.WriteTo(writer);
             }
-            writer.WriteNumber("worldX", worldPos.X);
-            writer.WriteNumber("worldY", worldPos.Y);
+
+            if (appendAnchorWorld)
+            {
+                writer.WriteNumber("worldX", anchorWorld.X);
+                writer.WriteNumber("worldY", anchorWorld.Y);
+            }
+
+            if (shape is EllipseShape ellipse && visual != null)
+                WriteEllipseFocusRelativeToAnchorForPersistence(writer, ellipse, anchorWorld);
+
             writer.WriteEndObject();
         }
 
+        private static Canvas FindChildShapeCanvas(Canvas groupCanvas, ShapeBase child)
+        {
+            if (groupCanvas == null) return null;
+            foreach (var ch in groupCanvas.Children.OfType<Canvas>())
+            {
+                if (ReferenceEquals(ch.Tag, child))
+                    return ch;
+            }
+            return null;
+        }
 
+        /// <summary>
+        /// Центр эллипса в мировых координатах из якоря — согласован с EllipseShape.Build (орбитальное смещение).
+        /// </summary>
+        private static Point GetEllipseCenterWorldForPersistence(EllipseShape ellipse, Point anchorWorld)
+        {
+            double angleRad = ellipse.Angle * Math.PI / 180.0;
+            double cos = Math.Cos(angleRad);
+            double sin = Math.Sin(angleRad);
+            double ax = ellipse.AnchorPoint.X * ellipse.Scale;
+            double ay = ellipse.AnchorPoint.Y * ellipse.Scale;
+            double rotatedVecX = -ax * cos + ay * sin;
+            double rotatedVecY = -ax * sin - ay * cos;
+            return new Point(anchorWorld.X + rotatedVecX, anchorWorld.Y + rotatedVecY);
+        }
+
+        /// <summary>
+        /// Записывает focusWorld: позиции фокусов как смещения от якоря фигуры (в тех же мировых осях, что и worldX/worldY).
+        /// </summary>
+        private static void WriteEllipseFocusRelativeToAnchorForPersistence(Utf8JsonWriter writer, EllipseShape ellipse, Point anchorWorld)
+        {
+            var centerWorld = GetEllipseCenterWorldForPersistence(ellipse, anchorWorld);
+            var (f1, f2) = ellipse.GetGlobalFocusPositions(centerWorld.X, centerWorld.Y);
+
+            writer.WritePropertyName("focusWorld");
+            writer.WriteStartObject();
+            writer.WriteNumber("focus1X", f1.X - anchorWorld.X);
+            writer.WriteNumber("focus1Y", f1.Y - anchorWorld.Y);
+            writer.WriteNumber("focus2X", f2.X - anchorWorld.X);
+            writer.WriteNumber("focus2Y", f2.Y - anchorWorld.Y);
+            writer.WriteEndObject();
+        }
+
+        // MainWindow.xaml.cs
+
+        private void SetServicePointsVisibility(Canvas visual, Visibility visibility)
+        {
+            if (visual == null) return;
+            foreach (UIElement child in visual.Children)
+            {
+                if (child is Ellipse el)
+                {
+                    string tag = el.Tag?.ToString();
+                    if (tag == "Anchor" || tag == "Focus1" || tag == "Focus2")
+                    {
+                        el.Visibility = visibility;
+                    }
+                }
+            }
+        }
 
         //Вспомогательный метод для рекурсивного маппинга
         private JsonShapeData MapShapeToData(ShapeBase s)
         {
             var data = new JsonShapeData
             {
-                type = s.GetType().Name,
+                type = (s is PolygonShape ps && ps.IsCustomSegmentShape) ? "CustomShape" : s.GetType().Name,
                 id = s.Id,
                 // Получаем мировую позицию якоря
                 worldX = (s is CompoundShape || _allShapes.Contains(s)) ?
@@ -3594,8 +4018,8 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                 vertices = s.Vertices?.Select(v => new JsonVertex { x = v.X, y = v.Y }).ToList()
             };
 
-            // Специфика CustomShape
-            if (s is CustomShape cs)
+            // Специфика CustomShape-like polygon (segment-driven)
+            if (s is PolygonShape cs && cs.IsCustomSegmentShape)
             {
                 data.isClosed = cs.IsClosed;
                 data.initialDirection = cs.InitialDirection;
@@ -3714,12 +4138,12 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             if (data.sideThicknesses != null) shape.SideThickness = new List<double>(data.sideThicknesses);
             if (data.edgeLocks != null) shape.EdgeLengthLocked = new List<bool>(data.edgeLocks);
 
-            // 2. Специфика CustomShape
-            if (shape is CustomShape cs && data.segments != null)
+            // 2. Специфика CustomShape-like (segment-driven) polygon
+            if (shape is PolygonShape cs && cs.IsCustomSegmentShape && data.segments != null)
             {
                 cs.IsClosed = data.isClosed;
                 cs.InitialDirection = data.initialDirection;
-                cs.Segments = data.segments.Select(sd => new LineSegment
+                cs.Segments = data.segments.Select(sd => new PolygonShape.CustomSegment
                 {
                     Name = sd.name,
                     Length = sd.length,
@@ -3730,9 +4154,9 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                     Color = ParseColor(sd.color)
                 }).ToList();
 
-                // Пересчитываем точки (в CustomShape.cs этот метод должен быть public или вызываться через Reflection)
-                cs.GetType().GetMethod("RebuildVertices", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                          ?.Invoke(cs, null);
+                // В старом формате могут отсутствовать vertices — тогда пересобираем по segments.
+                if (data.vertices == null || data.vertices.Count == 0)
+                    cs.RebuildVertices();
             }
 
             // 3. Специфика CompoundShape (Рекурсия)
@@ -3830,7 +4254,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             {
                 "PolygonShape" => new PolygonShape(),
                 "EllipseShape" => new EllipseShape(),
-                "CustomShape" => new CustomShape(),
+                "CustomShape" => new PolygonShape { IsCustomSegmentShape = true },
                 "CompoundShape" => new CompoundShape(),
                 // Обратная совместимость со старыми файлами
                 "RectangleShape" => PolygonShape.CreateRectangle(),
@@ -3892,13 +4316,25 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
         public static bool IsHighlightedChild(CompoundShape parent, ShapeBase child)
         {
             var main = (MainWindow)Application.Current.MainWindow;
-            // Проверяем, выделен ли этот ребенок в TreeView прямо сейчас
-            if (main.ShapesTreeView.SelectedItem is ShapeTreeItem item)
+
+            // Берем выделенный элемент (он теперь анонимный объект)
+            var selected = main.ShapesTreeView.SelectedItem;
+            if (selected == null) return false;
+
+            try
             {
-                return ReferenceEquals(item.Shape, child) &&
+                // Используем dynamic, чтобы вытащить Shape из анонимного объекта
+                dynamic item = selected;
+                ShapeBase selectedShape = item.Shape;
+
+                return ReferenceEquals(selectedShape, child) &&
                        main._editingParentCompound == parent;
             }
-            return false;
+            catch
+            {
+                // Если вдруг в TreeView попало что-то другое
+                return false;
+            }
         }
 
         // ==================== ПЕРЕТАСКИВАНИЕ ФОКУСОВ ЭЛЛИПСА ====================
@@ -3998,7 +4434,20 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                     using var stream = System.IO.File.Create(saveDialog.FileName);
                     using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
 
-                    _currentShape.SaveToJson(writer);
+                    if (_currentShapeVisual != null)
+                    {
+                        Point anchorWorld = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+                        using var ms = new System.IO.MemoryStream();
+                        using var tempWriter = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = false });
+                        _currentShape.SaveToJson(tempWriter);
+                        tempWriter.Flush();
+                        string json = Encoding.UTF8.GetString(ms.ToArray());
+                        using var doc = JsonDocument.Parse(json);
+                        WriteShapeJsonWithPersistedFocusWorld(writer, doc.RootElement, _currentShape, anchorWorld, _currentShapeVisual, appendAnchorWorld: true);
+                    }
+                    else
+                        _currentShape.SaveToJson(writer);
+
                     writer.Flush();
 
                     MessageBox.Show($"Фигура сохранена:\\n{saveDialog.FileName}",
@@ -4045,7 +4494,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
                 {
                     "PolygonShape" => new PolygonShape(),
                     "EllipseShape" => new EllipseShape(),
-                    "CustomShape" => new CustomShape(),
+                    "CustomShape" => new PolygonShape { IsCustomSegmentShape = true },
                     "CompoundShape" => new CompoundShape(),
                     _ => null
                 };
@@ -4126,7 +4575,62 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
 
 
 
+        // 1. Метод, который заменяет класс ShapeTreeItem.
+        // Он возвращает анонимный объект, который WPF понимает так же, как обычный класс.
+        private object BuildShapeTreeData(ShapeBase shape)
+        {
+            var children = new List<object>();
 
+            // Если фигура — группа (CompoundShape), рекурсивно добавляем её детей
+            if (shape is CompoundShape compound)
+            {
+                foreach (var child in compound.ChildShapes)
+                {
+                    children.Add(BuildShapeTreeData(child));
+                }
+            }
+
+            // Возвращаем объект со свойствами, которые ожидает твой XAML (DisplayText и Children)
+            return new
+            {
+                Shape = shape,
+                DisplayText = $"ID={shape.Id}. {shape.DisplayNameRu}",
+                Children = children
+            };
+        }
+
+        // 2. Обновленный метод обновления дерева
+        private void RefreshShapesTree()
+        {
+            // Очищаем текущий корень (если ты использовал _treeRootItems, его тоже можно удалить)
+            var treeRootNodes = new List<object>();
+
+            foreach (var shape in _allShapes)
+            {
+                // Вызываем наш метод для каждой корневой фигуры
+                treeRootNodes.Add(BuildShapeTreeData(shape));
+            }
+
+            // Привязываем список объектов напрямую к TreeView
+            ShapesTreeView.ItemsSource = null;
+            ShapesTreeView.ItemsSource = treeRootNodes;
+        }
+
+        // 3. Обновленный обработчик выбора в дереве
+        private void ShapesTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+        {
+            if (e.NewValue == null) return;
+
+            // Так как в дереве теперь "анонимные объекты", используем dynamic,
+            // чтобы достать свойство Shape без лишних классов.
+            dynamic selectedNode = e.NewValue;
+            try
+            {
+                ShapeBase shape = selectedNode.Shape;
+                HighlightShapeOnCanvas(shape);
+            }
+            catch { /* на случай если объект пустой */ }
+        }
 
 
 
@@ -4168,7 +4672,7 @@ private void OnCancelCreatingShape(object? sender, RoutedEventArgs e)
             public string color { get; set; }
             public double thickness { get; set; }
             public double angleToNext { get; set; }
-            public bool angleLocked { get; set; } 
+            public bool angleLocked { get; set; }
             public bool lengthLocked { get; set; }
         }
 

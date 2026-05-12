@@ -17,7 +17,7 @@ namespace ShapeEditor
     public class EllipseShape : ShapeBase
     {
         public int ApproximationPoints { get; set; } = 60;
-
+        public override string DisplayNameEn => IsCircle ? "Circle" : "Ellipse";
         // === ВНУТРЕННИЕ ПОЛНЫЕ ОСИ ===
         // _axisX — полная ось по X (горизонтальная)
         // _axisY — полная ось по Y (вертикальная)
@@ -337,10 +337,14 @@ namespace ShapeEditor
                         // Поворот фокусов относительно центра эллипса
                         double rfx = fx * cos - fy * sin;
                         double rfy = fx * sin + fy * cos;
-                        var f = new Ellipse { Width = 12, Height = 12, Fill = Brushes.Yellow, Stroke = Brushes.OrangeRed, StrokeThickness = 2, IsHitTestVisible = false, Tag = tag };
+                        var f = new Ellipse { Width = 12, Height = 12, Fill = Brushes.Yellow, Stroke = Brushes.OrangeRed, StrokeThickness = 2, IsHitTestVisible = false,
+                            Tag = tag,
+                            Visibility = Visibility.Collapsed
+                        };
                         Canvas.SetLeft(f, cx + rfx - 6);
                         Canvas.SetTop(f, cy + rfy - 6);
                         canvas.Children.Add(f);
+
                     }
                     DrawFocus(f1lx, f1ly, "Focus1");
                     DrawFocus(f2lx, f2ly, "Focus2");
@@ -391,7 +395,7 @@ namespace ShapeEditor
             writer.WriteStartObject();
             writer.WriteString("type", "EllipseShape");
             writer.WriteNumber("id", Id);
-            writer.WriteString("displayName", DisplayNameRu);
+            writer.WriteString("displayName", DisplayNameEn);
             writer.WriteNumber("scale", Scale);
             writer.WriteNumber("angle", Angle);
             writer.WriteNumber("anchorX", AnchorPoint.X);
@@ -444,9 +448,111 @@ namespace ShapeEditor
             if (element.TryGetProperty("sideThicknesses", out var thickProp))
                 foreach (var t in thickProp.EnumerateArray()) SideThickness.Add(t.GetDouble());
 
+            // При наличии focusWorld (смещения фокусов от якоря в мировых осях при сохранении) поле не используется —
+            // восстановление только из focalDistance, осей, угла, якоря и scale.
+
             UpdateFociFromParameters();
         }
 
         #endregion
+
+        // EllipseShape.cs
+
+        /// <summary>
+        /// Обновляет эллипс по новым мировым координатам фокусов.
+        /// Якорь всегда сбрасывается в центр (0,0).
+        /// Возвращает новую мировую позицию центра.
+        /// </summary>
+        // EllipseShape.cs
+
+        public Point UpdateFromWorldFociFixedCenter(Point f1W, Point f2W)
+        {
+            // Якорь всегда в центре
+            AnchorPoint = new Point(0, 0);
+
+            // Новый центр в мире — строго между новыми точками фокусов
+            Point newCenterW = new Point((f1W.X + f2W.X) / 2.0, (f1W.Y + f2W.Y) / 2.0);
+
+            // Расстояние между фокусами
+            double dx = f2W.X - f1W.X;
+            double dy = f2W.Y - f1W.Y;
+            double dist = Math.Sqrt(dx * dx + dy * dy);
+
+            // Новое локальное фокусное расстояние c
+            double newC = (dist / 2.0) / Scale;
+
+            // Если фокусы разнесли дальше текущей большой оси — расширяем её
+            if (newC >= MajorAxis / 2.0)
+                MajorAxis = (newC + 5.0) * 2.0;
+
+            // Apply through property so minor axis is recalculated from the entered foci.
+            // This preserves the exact focus pair instead of snapping c back from old axes.
+            FocalDistance = newC;
+
+            // Угол поворота линии фокусов
+            double newAngleRad = Math.Atan2(dy, dx);
+            double newAngleDeg = newAngleRad * 180.0 / Math.PI;
+
+            // For vertical major axis, convert world F1->F2 direction to local Y-axis reference.
+            // Using +90 flips focus identity (F1/F2) when editing Y values; -90 preserves it.
+            if (FociOnYAxis) newAngleDeg -= 90;
+
+            // Keep geometric angle consistent with world coordinates from Atan2.
+            // Negative sign mirrors the entered foci line.
+            Angle = newAngleDeg;
+
+            return newCenterW;
+        }
+        public void UpdateFromWorldFoci(Point f1W, Point f2W, Point anchorW)
+        {
+            // 1. Новый центр в мире — середина между фокусами
+            Point centerW = new Point((f1W.X + f2W.X) / 2.0, (f1W.Y + f2W.Y) / 2.0);
+
+            // 2. Новое фокусное расстояние (дистанция между фокусами пополам)
+            double dx = f2W.X - f1W.X;
+            double dy = f2W.Y - f1W.Y;
+            double dist = Math.Sqrt(dx * dx + dy * dy);
+            double newC = (dist / 2.0) / Scale;
+
+            // Автоматически расширяем большую ось, если фокусы разнесли слишком далеко
+            if (newC >= MajorAxis / 2.0)
+                MajorAxis = (newC + 5.0) * 2.0;
+
+            // Apply through property so minor axis is recalculated from the entered foci.
+            FocalDistance = newC;
+
+            // 3. Новый угол наклона
+            // Atan2 дает угол линии F1->F2. В нашей модели 0 градусов — это горизонталь.
+            double newAngleRad = Math.Atan2(dy, dx);
+            double newAngleDeg = newAngleRad * 180.0 / Math.PI;
+
+            // Если в модели фокусы на Y, корректируем на 90 градусов
+            // Same conversion as in UpdateFromWorldFociFixedCenter: keep focus ordering stable.
+            if (FociOnYAxis) newAngleDeg -= 90;
+
+            // Keep geometric angle consistent with world coordinates from Atan2.
+            Angle = newAngleDeg;
+
+            // 4. Пересчет локального AnchorPoint
+            // Нам нужно, чтобы старый мировой якорь (anchorW) имел те же координаты в мире,
+            // но теперь эллипс повернут на новый Angle и стоит в новом centerW.
+
+            // Вектор от нового центра к мировому якорю
+            double vax = anchorW.X - centerW.X;
+            double vay = anchorW.Y - centerW.Y;
+
+            // Разворачиваем этот вектор обратно на новый Angle, чтобы получить локальные оси
+            double rad = Angle * Math.PI / 180.0;
+            double invCos = Math.Cos(-rad);
+            double invSin = Math.Sin(-rad);
+
+            // Локальный якорь (относительно центра)
+            AnchorPoint = new Point(
+                (vax * invCos - vay * invSin) / Scale,
+                (vax * invSin + vay * invCos) / Scale
+            );
+
+            // Minor axis already synchronized by FocalDistance setter.
+        }
     }
 }

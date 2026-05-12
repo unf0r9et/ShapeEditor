@@ -16,12 +16,18 @@ namespace ShapeEditor
     {
         public List<ShapeBase> ChildShapes { get; set; } = new();
 
+        /// <summary>
+        /// World-space offsets of child anchor positions relative to the group's anchor.
+        /// Keyed by child Id to remain stable across UI rebuilds/serialization.
+        /// </summary>
+        public Dictionary<int, Point> ChildAnchorOffsets { get; private set; } = new();
+
         public CompoundShape()
         {
             SidesCount = 0;
             Fill = Brushes.Transparent;
         }
-
+        public override string DisplayNameEn => "Group";
         public override string DisplayNameRu => "Группа";
         protected override Point[] GetDefaultVertices() => new Point[0];
 
@@ -32,11 +38,24 @@ namespace ShapeEditor
             if (child == null || child is CompoundShape || ChildShapes.Contains(child))
                 return;
             ChildShapes.Add(child);
+            if (!ChildAnchorOffsets.ContainsKey(child.Id))
+                ChildAnchorOffsets[child.Id] = new Point(0, 0);
         }
 
         public void RemoveChildShape(ShapeBase child)
         {
             ChildShapes.Remove(child);
+            if (child != null)
+                ChildAnchorOffsets.Remove(child.Id);
+        }
+
+        public Point GetChildAnchorOffsetOrFallback(ShapeBase child)
+        {
+            if (child == null) return new Point(0, 0);
+            if (ChildAnchorOffsets.TryGetValue(child.Id, out var p))
+                return p;
+            // Backward-compatibility: older groups encoded child offset in AnchorPoint.
+            return child.AnchorPoint;
         }
 
         public override bool IsPointInside(Point localPoint)
@@ -64,10 +83,11 @@ namespace ShapeEditor
                 if (child is CompoundShape childCompound)
                     childCompound.RecalculateBounds();
 
-                rawMinX = Math.Min(rawMinX, child.AnchorPoint.X + child.MinX);
-                rawMaxX = Math.Max(rawMaxX, child.AnchorPoint.X + child.MaxX);
-                rawMinY = Math.Min(rawMinY, child.AnchorPoint.Y + child.MinY);
-                rawMaxY = Math.Max(rawMaxY, child.AnchorPoint.Y + child.MaxY);
+                var offset = GetChildAnchorOffsetOrFallback(child);
+                rawMinX = Math.Min(rawMinX, offset.X + child.MinX);
+                rawMaxX = Math.Max(rawMaxX, offset.X + child.MaxX);
+                rawMinY = Math.Min(rawMinY, offset.Y + child.MinY);
+                rawMaxY = Math.Max(rawMaxY, offset.Y + child.MaxY);
             }
 
             MinX = rawMinX; MinY = rawMinY;
@@ -106,8 +126,9 @@ namespace ShapeEditor
                 var childVisual = child.Build(0, 0);
                 childVisual.Tag = child;
 
-                double offsetX = (child.AnchorPoint.X + child.MinX - MinX) * Scale;
-                double offsetY = (child.AnchorPoint.Y + child.MinY - MinY) * Scale;
+                var childOffset = GetChildAnchorOffsetOrFallback(child);
+                double offsetX = (childOffset.X + child.MinX - MinX) * Scale;
+                double offsetY = (childOffset.Y + child.MinY - MinY) * Scale;
 
                 Canvas.SetLeft(childVisual, offsetX);
                 Canvas.SetTop(childVisual, offsetY);
@@ -116,9 +137,16 @@ namespace ShapeEditor
                 bool isEditingThis = MainWindow.IsEditingThisChild(this, child);
                 bool isHighlightedFromTree = MainWindow.IsHighlightedChild(this, child);
 
-                foreach (var sub in childVisual.Children.OfType<Ellipse>().Where(e => e.Tag?.ToString() == "Anchor"))
+                // Теперь ищем не только "Anchor", но и "Focus1", "Focus2"
+                foreach (var sub in childVisual.Children.OfType<Ellipse>())
                 {
-                    sub.Visibility = (isEditingThis || isHighlightedFromTree) ? Visibility.Visible : Visibility.Collapsed;
+                    string tag = sub.Tag?.ToString();
+                    if (tag == "Anchor" || tag == "Focus1" || tag == "Focus2")
+                    {
+                        // Показываем точки только если мы редактируем конкретно эту фигуру 
+                        // или выбрали её в дереве объектов. В остальных случаях — скрываем.
+                        sub.Visibility = (isEditingThis || isHighlightedFromTree) ? Visibility.Visible : Visibility.Collapsed;
+                    }
                 }
 
                 container.Children.Add(childVisual);
@@ -133,7 +161,7 @@ namespace ShapeEditor
                 Stroke = Brushes.Purple,
                 StrokeThickness = 1,
                 Tag = "Anchor",
-                IsHitTestVisible = true
+                Visibility = Visibility.Collapsed
             };
 
             double anchorVisualX = (AnchorPoint.X - MinX) * Scale - 5;
@@ -161,18 +189,32 @@ namespace ShapeEditor
             writer.WriteStartObject();
             writer.WriteString("type", "CompoundShape");
             writer.WriteNumber("id", Id);
-            writer.WriteString("displayName", DisplayNameRu);
+            writer.WriteString("displayName", DisplayNameEn);
             writer.WriteNumber("scale", Scale);
             writer.WriteNumber("angle", Angle);
             writer.WriteNumber("anchorX", AnchorPoint.X);
             writer.WriteNumber("anchorY", AnchorPoint.Y);
             writer.WriteString("fill", GetColorHex(Fill));
 
+            // Сохраняем смещения в том же порядке, в котором идут фигуры
+            writer.WritePropertyName("childOffsets");
+            writer.WriteStartArray();
+            foreach (var child in ChildShapes)
+            {
+                var p = GetChildAnchorOffsetOrFallback(child);
+                writer.WriteStartObject();
+                // childId оставляем для структуры, но при загрузке будем ориентироваться на порядок
+                writer.WriteNumber("childId", child.Id);
+                writer.WriteNumber("x", p.X);
+                writer.WriteNumber("y", p.Y);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+
             writer.WritePropertyName("childShapes");
             writer.WriteStartArray();
             foreach (var child in ChildShapes)
             {
-                // Рекурсивно сохраняем каждого ребёнка
                 child.SaveToJson(writer);
             }
             writer.WriteEndArray();
@@ -180,9 +222,9 @@ namespace ShapeEditor
             writer.WriteEndObject();
         }
 
-public override void LoadFromJson(JsonElement element)
+        public override void LoadFromJson(JsonElement element)
         {
-            //if (element.TryGetProperty("id", out var idProp)) Id = idProp.GetInt32();
+            // ID не трогаем, как вы и просили (пусть пересчитывается в MainWindow/Constructor)
             if (element.TryGetProperty("scale", out var sProp)) Scale = sProp.GetDouble();
             if (element.TryGetProperty("angle", out var aProp)) Angle = aProp.GetDouble();
             if (element.TryGetProperty("anchorX", out var axProp) && element.TryGetProperty("anchorY", out var ayProp))
@@ -190,10 +232,27 @@ public override void LoadFromJson(JsonElement element)
             if (element.TryGetProperty("fill", out var fProp)) Fill = ParseColor(fProp.GetString());
 
             ChildShapes.Clear();
+            ChildAnchorOffsets.Clear();
+
+            // 1. Сначала читаем все смещения в список (чтобы сохранить их порядок)
+            var tempOffsets = new List<Point>();
+            if (element.TryGetProperty("childOffsets", out var offsetsProp))
+            {
+                foreach (var o in offsetsProp.EnumerateArray())
+                {
+                    double x = o.TryGetProperty("x", out var xProp) ? xProp.GetDouble() : 0;
+                    double y = o.TryGetProperty("y", out var yProp) ? yProp.GetDouble() : 0;
+                    tempOffsets.Add(new Point(x, y));
+                }
+            }
+
+            // 2. Читаем фигуры
             if (element.TryGetProperty("childShapes", out var childrenProp))
             {
-                foreach (var childElement in childrenProp.EnumerateArray())
+                var childrenArray = childrenProp.EnumerateArray().ToList();
+                for (int i = 0; i < childrenArray.Count; i++)
                 {
+                    var childElement = childrenArray[i];
                     if (!childElement.TryGetProperty("type", out var typeProp))
                         continue;
 
@@ -202,16 +261,26 @@ public override void LoadFromJson(JsonElement element)
                     if (child != null)
                     {
                         child.LoadFromJson(childElement);
-                        // Пересчитываем границы ребёнка (важно для корректной группировки)
+
+                        // Важно: вызываем PreBuildChild ДО добавления в группу, 
+                        // чтобы у ребенка рассчитались MinX/MaxX
                         PreBuildChild(child);
-                        ChildShapes.Add(child);
+
+                        // Добавляем в группу
+                        AddChildShape(child);
+
+                        // 3. ПРИВЯЗКА ПО ИНДЕКСУ:
+                        // Берем i-тое смещение и привязываем его к НОВОМУ Id ребенка
+                        if (i < tempOffsets.Count)
+                        {
+                            ChildAnchorOffsets[child.Id] = tempOffsets[i];
+                        }
                     }
                 }
             }
 
             RecalculateBounds();
         }
-
         /// <summary>
         /// Предварительно строит фигуру в (0,0) чтобы вычислились MinX/MinY/MaxX/MaxY.
         /// </summary>
@@ -240,7 +309,7 @@ public override void LoadFromJson(JsonElement element)
             {
                 "PolygonShape" => new PolygonShape(),
                 "EllipseShape" => new EllipseShape(),
-                "CustomShape" => new CustomShape(),
+                "CustomShape" => new PolygonShape { IsCustomSegmentShape = true },
                 "CompoundShape" => new CompoundShape(),
                 _ => null
             };
