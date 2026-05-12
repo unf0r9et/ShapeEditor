@@ -17,8 +17,8 @@ namespace ShapeEditor
     /// </summary>
     public class PolygonShape : ShapeBase, IPolygonShape
     {
-        private string _displayNameRuOverride;
-        private string[] _sideNamesOverride;
+        private string? _displayNameRuOverride;
+        private string[]? _sideNamesOverride;
         public bool EnforceIsosceles { get; set; } = false;
         public string PolygonType { get; set; } = "Custom";
 
@@ -62,8 +62,8 @@ namespace ShapeEditor
         public override string DisplayNameRu => IsCustomSegmentShape ? "Пользовательская" : base.DisplayNameRu;
         public override string[] SideNames => _sideNamesOverride ?? base.SideNames;
 
-        public string DisplayNameRuOverride { get => _displayNameRuOverride; set => _displayNameRuOverride = value; }
-        public string[] SideNamesOverride { get => _sideNamesOverride; set => _sideNamesOverride = value; }
+        public string? DisplayNameRuOverride { get => _displayNameRuOverride; set => _displayNameRuOverride = value; }
+        public string[]? SideNamesOverride { get => _sideNamesOverride; set => _sideNamesOverride = value; }
 
         protected override Point[] GetDefaultVertices()
         {

@@ -116,6 +116,8 @@ public interface IEllipseShape : IShapeView
     int ApproximationPoints { get; set; }
     void UpdateFociFromParameters();
     (Point f1, Point f2) GetGlobalFocusPositions(double centerWorldX, double centerWorldY);
+    Point UpdateFromWorldFociFixedCenter(Point f1W, Point f2W);
+    void UpdateFromWorldFoci(Point f1W, Point f2W, Point anchorW);
 }
 
 public interface IPolygonShape : IShapeView
@@ -126,7 +128,7 @@ public interface IPolygonShape : IShapeView
     List<PolygonCustomSegment> Segments { get; set; }
     string PolygonType { get; set; }
     bool EnforceIsosceles { get; set; }
-    string DisplayNameRuOverride { get; set; }
+    string? DisplayNameRuOverride { get; set; }
     string[]? SideNamesOverride { get; set; }
     void AddSegment(double length, double internalAngle = 180);
     void RemoveSegment(int index);
