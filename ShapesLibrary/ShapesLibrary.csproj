@@ -9,8 +9,4 @@
     <AssemblyName>ShapesLibrary</AssemblyName>
   </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\ShapeEditor.Core\ShapeEditor.Core.csproj" />
-  </ItemGroup>
-
 </Project>

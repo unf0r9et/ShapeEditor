@@ -1,5 +1,4 @@
 <Solution>
-  <Project Path="ShapeEditor.Core/ShapeEditor.Core.csproj" />
   <Project Path="ShapesLibrary/ShapesLibrary.csproj" />
   <Project Path="ShapeEditor/ShapeEditor.csproj" />
 </Solution>

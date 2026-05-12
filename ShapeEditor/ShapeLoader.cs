@@ -1,47 +1,16 @@
 using System;
-using System.IO;
-using System.Reflection;
-using System.Windows;
 
 namespace ShapeEditor;
 
-/// <summary>
-/// Loads ShapesLibrary.dll at runtime (no project reference to the plugin assembly).
-/// Looks for <c>plugins/ShapesLibrary.dll</c> first, then the application directory.
-/// </summary>
+/// <summary>Инициализирует фабрику фигур из сборки ShapesLibrary (обычная ссылка на проект).</summary>
 public static class ShapeLoader
 {
-    public const string PluginSubFolder = "plugins";
-    public const string PluginDllFileName = "ShapesLibrary.dll";
-
-    /// <summary>Attempt to load the shapes plugin. On failure, <see cref="ShapePluginContext.Factory"/> stays null.</summary>
-    public static bool TryLoadShapesPlugin(string? pluginDirectory = null)
+    /// <summary>Регистрирует фабрику в <see cref="ShapePluginContext"/>.</summary>
+    public static bool TryLoadShapesPlugin()
     {
-        ShapePluginContext.Factory = null;
         try
         {
-            string baseDir = AppContext.BaseDirectory;
-            string path = Path.Combine(pluginDirectory ?? Path.Combine(baseDir, PluginSubFolder), PluginDllFileName);
-            if (!File.Exists(path))
-            {
-                path = Path.Combine(baseDir, PluginDllFileName);
-                if (!File.Exists(path))
-                    return false;
-            }
-
-            Assembly asm = Assembly.LoadFrom(path);
-            Type? entry = asm.GetType("ShapeEditor.ShapePluginEntry");
-            if (entry == null)
-                return false;
-
-            MethodInfo? m = entry.GetMethod("CreateFactory", BindingFlags.Public | BindingFlags.Static);
-            if (m == null)
-                return false;
-
-            if (m.Invoke(null, null) is not IShapeFactory factory)
-                return false;
-
-            ShapePluginContext.Factory = factory;
+            ShapePluginContext.Factory = ShapePluginEntry.CreateFactory();
             return true;
         }
         catch
@@ -54,7 +23,7 @@ public static class ShapeLoader
     public static IShapeFactory RequireFactory() =>
         ShapePluginContext.Factory
         ?? throw new InvalidOperationException(
-            $"Не удалось загрузить плагин фигур. Убедитесь, что {PluginDllFileName} находится в папке «{PluginSubFolder}» рядом с приложением.");
+            "Фабрика фигур не инициализирована. Вызовите ShapeLoader.TryLoadShapesPlugin() при старте приложения.");
 
     public static ShapeBase CreateFromPersistedType(string typeName) => RequireFactory().Create(typeName);
 

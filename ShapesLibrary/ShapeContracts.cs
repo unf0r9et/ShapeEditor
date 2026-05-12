@@ -47,7 +47,7 @@ public interface IShapeView
     void SaveToFile(string filename);
 }
 
-/// <summary>Creates concrete shapes from persisted JSON type names (implemented by the dynamically loaded plugin).</summary>
+/// <summary>Создаёт экземпляры фигур по строковому имени типа из JSON (реализация в ShapesLibrary).</summary>
 public interface IShapeFactory
 {
     ShapeBase? TryCreate(string persistedTypeName);
