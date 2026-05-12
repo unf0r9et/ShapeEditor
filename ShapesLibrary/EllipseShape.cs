@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -14,7 +14,7 @@ namespace ShapeEditor
     /// Большая ось определяется автоматически: max(_axisX, _axisY)
     /// Фокусы всегда на большей оси.
     /// </summary>
-    public class EllipseShape : ShapeBase
+    public class EllipseShape : ShapeBase, IEllipseShape
     {
         public int ApproximationPoints { get; set; } = 60;
         public override string DisplayNameEn => IsCircle ? "Circle" : "Ellipse";
@@ -249,26 +249,7 @@ namespace ShapeEditor
 
         public override Canvas Build(double anchorWorldX, double anchorWorldY)
         {
-            // 1. Проверка групп (оставляем без изменений)
-            var mainWin = System.Windows.Application.Current.MainWindow as MainWindow;
-            bool shouldShowHelpers = true;
-
-            if (mainWin != null)
-            {
-                var allShapesField = typeof(MainWindow).GetField("_allShapes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var allShapes = allShapesField?.GetValue(mainWin) as ShapeBase[];
-                if (allShapes != null)
-                {
-                    foreach (var s in allShapes)
-                    {
-                        if (s is CompoundShape group && group.ChildShapes.Contains(this))
-                        {
-                            shouldShowHelpers = MainWindow.IsEditingThisChild(group, this) || MainWindow.IsHighlightedChild(group, this);
-                            break;
-                        }
-                    }
-                }
-            }
+            bool shouldShowHelpers = ShapeCompositionHost.ShouldShowEllipseBuildHelpers?.Invoke(this) ?? true;
 
             // 2. Геометрия
             double width = _axisX * Scale;
@@ -554,5 +535,7 @@ namespace ShapeEditor
 
             // Minor axis already synchronized by FocalDistance setter.
         }
+
+        protected override bool UsesPolygonEdgeSnap() => false;
     }
 }

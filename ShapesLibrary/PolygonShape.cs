@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -15,37 +15,8 @@ namespace ShapeEditor
     /// Базовый класс для всех многоугольников.
     /// Через него строятся: прямоугольники, треугольники, трапеции, шестиугольники, произвольные многоугольники.
     /// </summary>
-    public class PolygonShape : ShapeBase
+    public class PolygonShape : ShapeBase, IPolygonShape
     {
-        public class CustomSegment
-        {
-            public string Name { get; set; } = "Сегмент";
-
-            // Параметры отрезка (в локальных координатах, немасштабированных)
-            public double Length { get; set; } = 100;
-            public Brush Color { get; set; } = Brushes.Black;
-            public double Thickness { get; set; } = 3.0;
-
-            // Угол между этим отрезком и СЛЕДУЮЩИМ (в градусах)
-            public double AngleToNext { get; set; } = 0;
-            public bool AngleLocked { get; set; } = false;
-            public bool LengthLocked { get; set; } = false;
-
-            public CustomSegment Clone()
-            {
-                return new CustomSegment
-                {
-                    Name = this.Name,
-                    Length = this.Length,
-                    Color = this.Color.Clone(),
-                    Thickness = this.Thickness,
-                    AngleToNext = this.AngleToNext,
-                    AngleLocked = this.AngleLocked,
-                    LengthLocked = this.LengthLocked
-                };
-            }
-        }
-
         private string _displayNameRuOverride;
         private string[] _sideNamesOverride;
         public bool EnforceIsosceles { get; set; } = false;
@@ -57,13 +28,13 @@ namespace ShapeEditor
         public double InitialDirection { get; set; } = 0.0;
         public bool IsClosed { get; set; } = false;
 
-        private List<CustomSegment> _segments = new();
-        public List<CustomSegment> Segments
+        private List<PolygonCustomSegment> _segments = new();
+        public List<PolygonCustomSegment> Segments
         {
             get => _segments;
             set
             {
-                _segments = value ?? new List<CustomSegment>();
+                _segments = value ?? new List<PolygonCustomSegment>();
             }
         }
 
@@ -348,7 +319,7 @@ namespace ShapeEditor
 
         public void AddSegment(double length, double internalAngle = 180)
         {
-            var segment = new CustomSegment
+            var segment = new PolygonCustomSegment
             {
                 Name = $"Отрезок {Segments.Count + 1}",
                 Length = length,
@@ -909,7 +880,7 @@ namespace ShapeEditor
                     {
                         if (s.ValueKind != JsonValueKind.Object) continue;
 
-                        var segment = new CustomSegment
+                        var segment = new PolygonCustomSegment
                         {
                             Name = s.TryGetProperty("name", out var nameProp) && nameProp.ValueKind == JsonValueKind.String
                                 ? nameProp.GetString()

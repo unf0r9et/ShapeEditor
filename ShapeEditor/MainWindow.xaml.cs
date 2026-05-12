@@ -90,7 +90,7 @@ namespace ShapeEditor
         private List<double?> _pendingEdgeLengths = new();
 
         private bool _isCreatingCustomShape = false;
-        private PolygonShape _creatingCustomShape = null;
+        private ShapeBase _creatingCustomShape = null;
         private int _creatingNextIndex = 0;
 
         private TextBox _newSegmentLengthBox;
@@ -103,7 +103,7 @@ namespace ShapeEditor
         private UIElement _segmentHighlightContainer = null;
 
         // Поля для работы с комплексными фигурами
-        public CompoundShape _editingParentCompound = null;
+        public ShapeBase _editingParentCompound = null;
         private ShapeBase _childShapeBeforeEdit = null;
 
         private List<Canvas> _selectedVisuals = new();
@@ -135,32 +135,26 @@ namespace ShapeEditor
         // --- ОБНОВЛЁННЫЕ МЕТОДЫ ДОБАВЛЕНИЯ ФИГУР ---
 
         private void AddRectangle(object sender, RoutedEventArgs e) =>
-            AddShape(PolygonShape.CreateRectangle());
+            AddShape(ShapeLoader.CreateRectangle());
 
         private void AddTriangle(object sender, RoutedEventArgs e) =>
-            AddShape(PolygonShape.CreateTriangle());
+            AddShape(ShapeLoader.CreateTriangle());
 
         private void AddTrapezoid(object sender, RoutedEventArgs e) =>
-            AddShape(PolygonShape.CreateTrapezoid());
+            AddShape(ShapeLoader.CreateTrapezoid());
 
         private void AddHexagon(object sender, RoutedEventArgs e) =>
-            AddShape(PolygonShape.CreateHexagon());
+            AddShape(ShapeLoader.CreateHexagon());
 
         private void AddCircle(object sender, RoutedEventArgs e)
         {
-            var circle = new EllipseShape { IsCircle = true, MajorAxis = 100 };
+            var circle = ShapeLoader.CreateCircle();
             AddShape(circle);
         }
 
         private void AddEllipse(object sender, RoutedEventArgs e)
         {
-            var ellipse = new EllipseShape
-            {
-                IsCircle = false,
-                MajorAxis = 120,
-                MinorAxis = 80,
-                FocalDistance = 40
-            };
+            var ellipse = ShapeLoader.CreateEllipseToolbarDefault();
             AddShape(ellipse);
         }
 
@@ -175,8 +169,30 @@ namespace ShapeEditor
         public MainWindow()
         {
             InitializeComponent();
+            RegisterShapeCompositionHosts();
             this.PreviewKeyDown += MainWindow_PreviewKeyDown;
             DrawCanvas.MouseLeftButtonDown += DrawCanvas_BackgroundClick;
+        }
+
+        private void RegisterShapeCompositionHosts()
+        {
+            CompoundShapeHost.IsEditingThisChild = (parent, child) =>
+                _editingParentCompound == parent && _currentShape == child;
+
+            CompoundShapeHost.IsHighlightedChild = IsHighlightedChildStatic;
+
+            ShapeCompositionHost.ShouldShowEllipseBuildHelpers = ellipse =>
+            {
+                if (_allShapes == null) return true;
+                foreach (var s in _allShapes)
+                {
+                    if (s is ICompoundShape group && group.ChildShapes.Contains(ellipse))
+                        return (_editingParentCompound == s && _currentShape == ellipse)
+                               || IsHighlightedChildStatic(s, ellipse);
+                }
+
+                return true;
+            };
         }
 
         private Point GetVertexWorldPosition(ShapeBase shape, Canvas visual, int vertexIndex)
@@ -220,7 +236,7 @@ namespace ShapeEditor
         private void AddCustomShape(object sender, RoutedEventArgs e)
         {
             // Начинаем интерактивное создание кастомной фигуры
-            var custom = new PolygonShape { IsCustomSegmentShape = true };
+            var custom = ShapeLoader.CreateCustomPolygon();
             custom.Scale = 1.0;
             custom.Angle = 0;
             custom.Fill = Brushes.Transparent;
@@ -245,7 +261,7 @@ namespace ShapeEditor
 
         private void AddCompoundShape(object sender, RoutedEventArgs e)
         {
-            var compound = new CompoundShape();
+            var compound = ShapeLoader.CreateCompound();
             // Список пуст изначально
             //compound.Id = GetNextAvailableId(); // НАЗНАЧАЕМ ID ТУТ
 
@@ -456,7 +472,7 @@ namespace ShapeEditor
                 {
                     ellipse.Cursor = Cursors.SizeAll;
 
-                    if (shape is CompoundShape)
+                    if (shape is ICompoundShape)
                     {
                         ellipse.MouseLeftButtonDown += CompoundAnchor_Down;
                         ellipse.MouseMove += CompoundAnchor_Move;
@@ -472,7 +488,7 @@ namespace ShapeEditor
             }
 
             //// === ОБРАБОТЧИКИ ДЛЯ ФОКУСОВ ЭЛЛИПСА ===
-            //if (shape is EllipseShape ellipseShape && !ellipseShape.IsCircle)
+            //if (shape is IEllipseShape ellipseShape && !ellipseShape.IsCircle)
             //{
             //    foreach (UIElement child in canvas.Children)
             //    {
@@ -606,7 +622,7 @@ namespace ShapeEditor
             if (_angleTextBox != null) _angleTextBox.Text = ((int)-_currentShape.Angle).ToString();
 
             // Обновление параметров эллипса
-            if (_currentShape is EllipseShape ellipse)
+            if (_currentShape is IEllipseShape ellipse)
             {
                 // Находим TextBox напрямую по Tag, без перебора StackPanel
                 foreach (var tb in FindTextBoxesByTag(_paramsStackPanel,
@@ -779,7 +795,7 @@ namespace ShapeEditor
             }
         }
 
-        private Point GetEllipseCenterWorldFromCurrentVisual(EllipseShape ellipse)
+        private Point GetEllipseCenterWorldFromCurrentVisual(ShapeBase ellipse)
         {
             Point anchorWorld = ellipse.GetAnchorWorldPosition(_currentShapeVisual);
             double angleRad = ellipse.Angle * Math.PI / 180.0;
@@ -882,7 +898,7 @@ namespace ShapeEditor
             _vertexWorldXBoxes.Clear(); // ← важно!
             _vertexWorldYBoxes.Clear(); // ← важно!
 
-            if (_currentShape is EllipseShape)
+            if (_currentShape is IEllipseShape)
             {
                 if (_stickyFocusShapeId != _currentShape.Id)
                 {
@@ -896,7 +912,7 @@ namespace ShapeEditor
                 _stickyFocusShapeId = -1;
             }
 
-            bool isCircle = _currentShape is EllipseShape ellipseCheck && ellipseCheck.IsCircle; int sides = _currentShape.SidesCount;
+            bool isCircle = _currentShape is IEllipseShape ellipseCheck && ellipseCheck.IsCircle; int sides = _currentShape.SidesCount;
             string[] names = _currentShape.SideNames ?? Array.Empty<string>();
 
             // prepare pending lengths
@@ -984,7 +1000,7 @@ namespace ShapeEditor
             }
 
             // === СЕКЦИЯ ПАРАМЕТРОВ ЭЛЛИПСА ===
-            if (_currentShape is EllipseShape ellipse)
+            if (_currentShape is IEllipseShape ellipse)
             {
                 _paramsStackPanel.Children.Add(new TextBlock
                 {
@@ -1246,7 +1262,7 @@ namespace ShapeEditor
             }
 
             // Для кастомных фигур — добавляем углы между отрезками
-            if (_currentShape is PolygonShape customShape && customShape.IsCustomSegmentShape)
+            if (_currentShape is IPolygonShape customShape && customShape.IsCustomSegmentShape)
             {
                 _paramsStackPanel.Children.Add(new TextBlock
                 {
@@ -1333,7 +1349,7 @@ namespace ShapeEditor
             }
 
             // Добавлено: блок для режима создания кастомной фигуры
-            if (_currentShape is PolygonShape sc && sc.IsCustomSegmentShape && _isCreatingCustomShape && sc == _creatingCustomShape)
+            if (_currentShape is IPolygonShape sc && sc.IsCustomSegmentShape && _isCreatingCustomShape && sc == _creatingCustomShape)
             {
                 _paramsStackPanel.Children.Add(new TextBlock
                 {
@@ -1379,7 +1395,7 @@ namespace ShapeEditor
             }
 
             // Внутри RebuildParamsPanel, после обработки CustomShape:
-            if (_currentShape is CompoundShape compound)
+            if (_currentShape is ICompoundShape compound)
             {
                 _paramsStackPanel.Children.Add(new TextBlock
                 {
@@ -1414,7 +1430,7 @@ namespace ShapeEditor
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
                     // 🔹 Кнопка с номером и русским именем
-                    // Внутри RebuildParamsPanel, блок if (_currentShape is CompoundShape compound)
+                    // Внутри RebuildParamsPanel, блок if (_currentShape is ICompoundShape compound)
 
                     var nameBtn = new Button
                     {
@@ -1631,7 +1647,7 @@ namespace ShapeEditor
                 }
 
                 // Чекбокс "Равнобедренная трапеция" только для трапеции
-                if (_currentShape is PolygonShape polyTrap && polyTrap.PolygonType == "Trapezoid")
+                if (_currentShape is IPolygonShape polyTrap && polyTrap.PolygonType == "Trapezoid")
                 {
                     var isoscelesCbRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 6) };
                     _isoscelesCheckBox = new CheckBox
@@ -2027,7 +2043,7 @@ namespace ShapeEditor
                     _colorTextBoxes[idx].Text = GetColorHex(brush);
 
                 // если это CustomShape-like polygon — синхронизируем цвет сегмента
-                if (_currentShape is PolygonShape cs && cs.IsCustomSegmentShape && idx < cs.Segments.Count)
+                if (_currentShape is IPolygonShape cs && cs.IsCustomSegmentShape && idx < cs.Segments.Count)
                     cs.Segments[idx].Color = brush;
 
                 RedrawPreservingAnchor();
@@ -2066,7 +2082,7 @@ namespace ShapeEditor
                 _currentShape.SideThickness[idx] = v;
 
                 // синхронизация для CustomShape-like polygon
-                if (_currentShape is PolygonShape cs && cs.IsCustomSegmentShape && idx < cs.Segments.Count)
+                if (_currentShape is IPolygonShape cs && cs.IsCustomSegmentShape && idx < cs.Segments.Count)
                     cs.Segments[idx].Thickness = v;
 
                 RedrawPreservingAnchor();
@@ -2085,7 +2101,7 @@ namespace ShapeEditor
                 _pendingEdgeLengths[edgeIndex] = v; // сохраняем как число (целое в double)
 
                 // Если это трапеция и включена равнобедренность — синхронизируем парную сторону (1 <-> 3)
-                if (_currentShape is PolygonShape polyTrap2 && polyTrap2.PolygonType == "Trapezoid" && polyTrap2.EnforceIsosceles && (edgeIndex == 1 || edgeIndex == 3))
+                if (_currentShape is IPolygonShape polyTrap2 && polyTrap2.PolygonType == "Trapezoid" && polyTrap2.EnforceIsosceles && (edgeIndex == 1 || edgeIndex == 3))
                 {
                     int partner = edgeIndex == 1 ? 3 : 1;
                     bool partnerLocked = (partner < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[partner];
@@ -2140,8 +2156,8 @@ namespace ShapeEditor
             if (locked) return;
 
             // For Triangle and Trapezoid: always try atomic application using TrySetEdgeLengths
-            if ((_currentShape is PolygonShape polyTri && polyTri.PolygonType == "Triangle") ||
-                            (_currentShape is PolygonShape polyTrap3 && polyTrap3.PolygonType == "Trapezoid"))
+            if ((_currentShape is IPolygonShape polyTri && polyTri.PolygonType == "Triangle") ||
+                            (_currentShape is IPolygonShape polyTrap3 && polyTrap3.PolygonType == "Trapezoid"))
             {
                 double[] lengths = new double[_currentShape.Vertices.Length];
                 for (int i = 0; i < lengths.Length; i++) lengths[i] = _currentShape.GetEdgeLength(i);
@@ -2157,7 +2173,7 @@ namespace ShapeEditor
                     lengths[edgeIndex] = value;
 
                 // Если трапеция и включена равнобедренность — зеркалим при возможности
-                if (_currentShape is PolygonShape polyTrap4 && polyTrap4.PolygonType == "Trapezoid" && polyTrap4.EnforceIsosceles)
+                if (_currentShape is IPolygonShape polyTrap4 && polyTrap4.PolygonType == "Trapezoid" && polyTrap4.EnforceIsosceles)
                 {
                     int partner = (edgeIndex == 1) ? 3 : (edgeIndex == 3 ? 1 : -1);
                     if (partner >= 0)
@@ -2204,7 +2220,7 @@ namespace ShapeEditor
             }
 
             // If trapezoid with enforce isosceles, mirror sides
-            if (_currentShape is PolygonShape polyTrap5 && polyTrap5.PolygonType == "Trapezoid" && polyTrap5.EnforceIsosceles)
+            if (_currentShape is IPolygonShape polyTrap5 && polyTrap5.PolygonType == "Trapezoid" && polyTrap5.EnforceIsosceles)
             {
                 // prefer right side value if present, otherwise left
                 int rightIdx = 1, leftIdx = 3;
@@ -2227,7 +2243,7 @@ namespace ShapeEditor
             }
 
             // Если фигура поддерживает атомарное применение (треугольник/трапеция) — попробуем TrySetEdgeLengths
-            if (_currentShape is PolygonShape polyTri && polyTri.PolygonType == "Triangle" || _currentShape is PolygonShape polyTrap11 && polyTrap11.PolygonType == "Trapezoid")
+            if (_currentShape is IPolygonShape polyTri && polyTri.PolygonType == "Triangle" || _currentShape is IPolygonShape polyTrap11 && polyTrap11.PolygonType == "Trapezoid")
             {
                 if (!_currentShape.TrySetEdgeLengths(lengths))
                 {
@@ -2261,7 +2277,7 @@ namespace ShapeEditor
 
         private void IsoscelesCheckChanged(object? sender, RoutedEventArgs e)
         {
-            if (!(_currentShape is PolygonShape polyTrap8 && polyTrap8.PolygonType == "Trapezoid")) return; bool isChecked = _isoscelesCheckBox?.IsChecked == true;
+            if (!(_currentShape is IPolygonShape polyTrap8 && polyTrap8.PolygonType == "Trapezoid")) return; bool isChecked = _isoscelesCheckBox?.IsChecked == true;
             polyTrap8.EnforceIsosceles = isChecked;
 
             // При включении — синхронизируем значения боковых сторон в UI (при условии, что сторона не заблокирована)
@@ -2274,7 +2290,7 @@ namespace ShapeEditor
         private void SyncIsoscelesTextboxesFromUI()
         {
             if (_edgeLengthBoxes == null || _edgeLengthBoxes.Count < 4) return;
-            if (!(_currentShape is PolygonShape polyTrap9 && polyTrap9.PolygonType == "Trapezoid")) return;
+            if (!(_currentShape is IPolygonShape polyTrap9 && polyTrap9.PolygonType == "Trapezoid")) return;
 
             int rightIdx = 1, leftIdx = 3;
             bool leftLocked = (leftIdx < _currentShape.EdgeLengthLocked.Count) && _currentShape.EdgeLengthLocked[leftIdx];
@@ -2538,7 +2554,7 @@ namespace ShapeEditor
 
         private void ApplyGlobalFocusChange()
         {
-            if (_currentShape is not EllipseShape ellipse || _currentShapeVisual == null) return;
+            if (_currentShape is not IEllipseShape ellipse || _currentShapeVisual == null) return;
 
             // 1. Получаем ТЕКУЩИЕ мировые координаты фокусов прямо сейчас на холсте
             Point centerWorld = GetEllipseCenterWorldFromCurrentVisual(ellipse);
@@ -2973,7 +2989,7 @@ namespace ShapeEditor
             _segmentHighlightContainer = null;
 
             if (_currentShape == null || _currentShapeVisual == null) return;
-            if (!(_currentShape is PolygonShape cs) || !cs.IsCustomSegmentShape) return;
+            if (!(_currentShape is IPolygonShape cs) || !cs.IsCustomSegmentShape) return;
 
             // контейнер для оверлеев
             var container = new Canvas { IsHitTestVisible = false };
@@ -3121,7 +3137,7 @@ namespace ShapeEditor
 
         private void ApplyAngleChange(int segmentIndex, string inputText)
         {
-            if (_currentShape is not PolygonShape customShape || !customShape.IsCustomSegmentShape) return;
+            if (_currentShape is not IPolygonShape customShape || !customShape.IsCustomSegmentShape) return;
             if (segmentIndex < 0 || segmentIndex >= customShape.Segments.Count) return;
 
             if (double.TryParse(inputText, out double newAngle))
@@ -3156,7 +3172,7 @@ namespace ShapeEditor
             {
                 if (child.Children.Count >= 2 && child.Children[1] is TextBox tb && tb.Tag is int idx && idx == segmentIndex)
                 {
-                    double currentAngle = (_currentShape is PolygonShape ps && ps.IsCustomSegmentShape)
+                    double currentAngle = (_currentShape is IPolygonShape ps && ps.IsCustomSegmentShape)
                         ? ps.GetEdgeAngle(segmentIndex)
                         : 0;
                     tb.Text = currentAngle.ToString("0.0");
@@ -3166,16 +3182,16 @@ namespace ShapeEditor
         }
 
 
-        private void AddChildToCompound(CompoundShape parent, string type)
+        private void AddChildToCompound(ShapeBase parent, string type)
         {
             ShapeBase newShape = type switch
             {
-                "Прямоугольник" => PolygonShape.CreateRectangle(),
-                "Треугольник" => PolygonShape.CreateTriangle(),
-                "Трапеция" => PolygonShape.CreateTrapezoid(),
-                "Круг" => new EllipseShape { IsCircle = true, MajorAxis = 100 },
-                "Шестиугольник" => PolygonShape.CreateHexagon(),
-                _ => PolygonShape.CreateRectangle()
+                "Прямоугольник" => ShapeLoader.CreateRectangle(),
+                "Треугольник" => ShapeLoader.CreateTriangle(),
+                "Трапеция" => ShapeLoader.CreateTrapezoid(),
+                "Круг" => ShapeLoader.CreateCircle(),
+                "Шестиугольник" => ShapeLoader.CreateHexagon(),
+                _ => ShapeLoader.CreateRectangle()
             };
 
             // Настройка базовых свойств
@@ -3186,12 +3202,12 @@ namespace ShapeEditor
                 newShape.SideThickness.Add(2.0);
             }
 
-            parent.AddChildShape(newShape);
+            ((ICompoundShape)parent).AddChildShape(newShape);
             RedrawPreservingAnchor();
             RebuildParamsPanel();
         }
 
-        private void StartEditingChild(CompoundShape parent, ShapeBase child)
+        private void StartEditingChild(ShapeBase parent, ShapeBase child)
         {
             // === 1. Вычисляем мировую позицию якоря ребёнка ===
             Point parentWorld = parent.GetAnchorWorldPosition(_currentShapeVisual);
@@ -3291,10 +3307,11 @@ namespace ShapeEditor
             RefreshShapesTree();
         }
 
-        private void HighlightChildInCompound(CompoundShape parent, int childIndex)
+        private void HighlightChildInCompound(ShapeBase parent, int childIndex)
         {
-            if (childIndex < 0 || childIndex >= parent.ChildShapes.Count) return;
-            var child = parent.ChildShapes[childIndex];
+            if (parent is not ICompoundShape ic) return;
+            if (childIndex < 0 || childIndex >= ic.ChildShapes.Count) return;
+            var child = ic.ChildShapes[childIndex];
 
             foreach (var element in _currentShapeVisual.Children)
             {
@@ -3313,7 +3330,9 @@ namespace ShapeEditor
         {
             if (_selectedVisuals.Count < 2) return;
 
-            var compound = new CompoundShape();
+            var compound = ShapeLoader.CreateCompound();
+            if (compound is not ICompoundShape groupCompound)
+                return;
 
             // Считаем общие границы ВСЕХ фигур
             double minX = double.MaxValue, minY = double.MaxValue;
@@ -3323,11 +3342,11 @@ namespace ShapeEditor
             {
                 var shape = vis.Tag as ShapeBase;
 
-                if (shape is CompoundShape nestedCompound)
+                if (shape is ICompoundShape nestedCompound)
                 {
                     foreach (var child in nestedCompound.ChildShapes)
                     {
-                        Point childWorld = GetChildWorldPosition(nestedCompound, vis, child);
+                        Point childWorld = GetChildWorldPosition(shape, vis, child);
                         minX = Math.Min(minX, childWorld.X + child.MinX);
                         minY = Math.Min(minY, childWorld.Y + child.MinY);
                         maxX = Math.Max(maxX, childWorld.X + child.MaxX);
@@ -3351,13 +3370,13 @@ namespace ShapeEditor
             {
                 var shape = vis.Tag as ShapeBase;
 
-                if (shape is CompoundShape nestedCompound)
+                if (shape is ICompoundShape nestedCompound)
                 {
                     foreach (var child in nestedCompound.ChildShapes.ToList())
                     {
-                        Point childWorld = GetChildWorldPosition(nestedCompound, vis, child);
-                        compound.AddChildShape(child);
-                        compound.ChildAnchorOffsets[child.Id] = new Point(
+                        Point childWorld = GetChildWorldPosition(shape, vis, child);
+                        groupCompound.AddChildShape(child);
+                        groupCompound.ChildAnchorOffsets[child.Id] = new Point(
                             childWorld.X - groupWorldAnchor.X,
                             childWorld.Y - groupWorldAnchor.Y
                         );
@@ -3366,13 +3385,13 @@ namespace ShapeEditor
                     nestedCompound.ChildShapes.Clear();
                     nestedCompound.ChildAnchorOffsets.Clear();
                     DrawCanvas.Children.Remove(vis);
-                    RemoveShapeFromArray(nestedCompound);
+                    RemoveShapeFromArray(shape);
                 }
                 else
                 {
                     Point childWorldPos = shape.GetAnchorWorldPosition(vis);
-                    compound.AddChildShape(shape);
-                    compound.ChildAnchorOffsets[shape.Id] = new Point(
+                    groupCompound.AddChildShape(shape);
+                    groupCompound.ChildAnchorOffsets[shape.Id] = new Point(
                         childWorldPos.X - groupWorldAnchor.X,
                         childWorldPos.Y - groupWorldAnchor.Y
                     );
@@ -3392,17 +3411,17 @@ namespace ShapeEditor
 
         private void UngroupSelected()
         {
-            if (!(_currentShape is CompoundShape compound)) return;
+            if (_currentShape is not ShapeBase groupShape || groupShape is not ICompoundShape compound) return;
 
             // 1. Сначала сохраняем нужные данные
-            Point groupWorldPos = _currentShape.GetAnchorWorldPosition(_currentShapeVisual);
+            Point groupWorldPos = groupShape.GetAnchorWorldPosition(_currentShapeVisual);
             var childrenToMove = compound.ChildShapes.ToList();
             var oldGroupVisual = _currentShapeVisual;
 
             // 2. КРИТИЧЕСКИЙ МОМЕНТ: Сбрасываем выделение и удаляем группу из списков ДО создания новых визуалов
             // Это обнулит _currentShape, и Build() у эллипсов не будет прятать точки
             ClearSelection();
-            RemoveShapeFromArray(compound);
+            RemoveShapeFromArray(groupShape);
             DrawCanvas.Children.Remove(oldGroupVisual);
 
             // 3. Очищаем список детей у самой модели группы, 
@@ -3411,13 +3430,13 @@ namespace ShapeEditor
 
             foreach (var child in childrenToMove)
             {
-                double angleRad = compound.Angle * Math.PI / 180.0;
+                double angleRad = groupShape.Angle * Math.PI / 180.0;
                 double cos = Math.Cos(angleRad);
                 double sin = Math.Sin(angleRad);
 
                 Point childOffset = compound.GetChildAnchorOffsetOrFallback(child);
-                double lx = childOffset.X * compound.Scale;
-                double ly = childOffset.Y * compound.Scale;
+                double lx = childOffset.X * groupShape.Scale;
+                double ly = childOffset.Y * groupShape.Scale;
 
                 double worldX = groupWorldPos.X + (lx * cos - ly * sin);
                 double worldY = groupWorldPos.Y + (lx * sin + ly * cos);
@@ -3433,13 +3452,16 @@ namespace ShapeEditor
         }
 
         // 🔹 Вспомогательный метод: вычисление мировой позиции ребёнка внутри вложенной группы
-        private Point GetChildWorldPosition(CompoundShape parent, Canvas parentVisual, ShapeBase child)
+        private Point GetChildWorldPosition(ShapeBase parent, Canvas parentVisual, ShapeBase child)
         {
+            if (parent is not ICompoundShape ic)
+                return new Point(0, 0);
+
             Point parentWorld = parent.GetAnchorWorldPosition(parentVisual);
             double rad = parent.Angle * Math.PI / 180.0;
             double cos = Math.Cos(rad), sin = Math.Sin(rad);
 
-            Point childOffset = parent.GetChildAnchorOffsetOrFallback(child);
+            Point childOffset = ic.GetChildAnchorOffsetOrFallback(child);
             double lx = childOffset.X * parent.Scale;
             double ly = childOffset.Y * parent.Scale;
             double rx = lx * cos - ly * sin;
@@ -3456,7 +3478,7 @@ namespace ShapeEditor
             GroupMenu.IsEnabled = _selectedVisuals.Count >= 2;
 
             // Разгруппировать можно, только если выбрана ОДНА фигура и это группа (CompoundShape)
-            UngroupMenu.IsEnabled = _selectedVisuals.Count == 1 && _currentShape is CompoundShape;
+            UngroupMenu.IsEnabled = _selectedVisuals.Count == 1 && _currentShape is ICompoundShape;
         }
 
         private void GroupMenuItem_Click(object sender, RoutedEventArgs e)
@@ -3484,7 +3506,7 @@ namespace ShapeEditor
             RefreshShapesTree();
         }
 
-        public static bool IsEditingThisChild(CompoundShape parent, ShapeBase child)
+        public static bool IsEditingThisChild(ShapeBase parent, ShapeBase child)
         {
             var main = (MainWindow)Application.Current.MainWindow;
             return main._editingParentCompound == parent && main._currentShape == child;
@@ -3495,14 +3517,15 @@ namespace ShapeEditor
         private void CompoundAnchor_Down(object sender, MouseButtonEventArgs e)
         {
             if (sender is not Ellipse ellipse) return;
-            if (ellipse.Parent is not Canvas canvas || canvas.Tag is not CompoundShape compound) return;
+            if (ellipse.Parent is not Canvas canvas || canvas.Tag is not ShapeBase compoundSb || compoundSb is not ICompoundShape)
+                return;
 
-            _currentShape = compound;
+            _currentShape = compoundSb;
             _currentShapeVisual = canvas;
             anchorDragCanvas = canvas;
 
             dragStartWorld = e.GetPosition(DrawCanvas);
-            originalAnchorPos = compound.AnchorPoint;   // запоминаем текущее положение якоря
+            originalAnchorPos = compoundSb.AnchorPoint;   // запоминаем текущее положение якоря
 
             draggingAnchor = true;
             ellipse.CaptureMouse();
@@ -3511,7 +3534,8 @@ namespace ShapeEditor
 
         private void CompoundAnchor_Move(object sender, MouseEventArgs e)
         {
-            if (!draggingAnchor || _currentShape is not CompoundShape compound || _currentShapeVisual == null)
+            if (!draggingAnchor || _currentShapeVisual == null) return;
+            if (_currentShape is not ShapeBase compoundSb || compoundSb is not ICompoundShape)
                 return;
 
             if (_isProcessingMove) return;
@@ -3523,8 +3547,8 @@ namespace ShapeEditor
                 Vector deltaWorld = currentMouse - dragStartWorld;
 
                 // Меняем только AnchorPoint
-                Vector deltaLocal = deltaWorld / compound.Scale;
-                compound.AnchorPoint = new Point(
+                Vector deltaLocal = deltaWorld / compoundSb.Scale;
+                compoundSb.AnchorPoint = new Point(
                     Math.Round(originalAnchorPos.X + deltaLocal.X, 2),
                     Math.Round(originalAnchorPos.Y + deltaLocal.Y, 2));
 
@@ -3539,7 +3563,9 @@ namespace ShapeEditor
 
         private void UpdateOnlyGroupAnchorVisualPosition()
         {
-            if (_currentShapeVisual == null || _currentShape is not CompoundShape compound) return;
+            if (_currentShapeVisual == null) return;
+            if (_currentShape is not ShapeBase groupShape || groupShape is not ICompoundShape group)
+                return;
 
             var anchorEllipse = _currentShapeVisual.Children
                 .OfType<Ellipse>()
@@ -3551,7 +3577,7 @@ namespace ShapeEditor
             double rawMinX = double.MaxValue, rawMaxX = double.MinValue;
             double rawMinY = double.MaxValue, rawMaxY = double.MinValue;
 
-            foreach (var child in compound.ChildShapes)
+            foreach (var child in group.ChildShapes)
             {
                 rawMinX = Math.Min(rawMinX, child.AnchorPoint.X + child.MinX);
                 rawMaxX = Math.Max(rawMaxX, child.AnchorPoint.X + child.MaxX);
@@ -3567,8 +3593,8 @@ namespace ShapeEditor
             double halfW = _currentShapeVisual.Width / 2;
             double halfH = _currentShapeVisual.Height / 2;
 
-            double anchorX = (compound.AnchorPoint.X - centerX) * compound.Scale + halfW;
-            double anchorY = (compound.AnchorPoint.Y - centerY) * compound.Scale + halfH;
+            double anchorX = (groupShape.AnchorPoint.X - centerX) * groupShape.Scale + halfW;
+            double anchorY = (groupShape.AnchorPoint.Y - centerY) * groupShape.Scale + halfH;
 
             Canvas.SetLeft(anchorEllipse, anchorX - 5); // -5 для центрирования самой точки (10px)
             Canvas.SetTop(anchorEllipse, anchorY - 5);
@@ -3629,7 +3655,7 @@ namespace ShapeEditor
         //    foreach (var shape in _allShapes)
         //    {
         //        var item = new ShapeTreeItem(shape);
-        //        if (shape is CompoundShape compound)
+        //        if (shape is ICompoundShape compound)
         //        {
         //            foreach (var child in compound.ChildShapes)
         //            {
@@ -3669,7 +3695,7 @@ namespace ShapeEditor
         //    var visual = _allShapeVisuals.FirstOrDefault(v => ReferenceEquals(v.Tag, shape));
         //    if (visual == null) return;
 
-        //    if (shape is CompoundShape)
+        //    if (shape is ICompoundShape)
         //    {
         //        ShowBoundingBox(visual);                   
         //    }
@@ -3687,7 +3713,7 @@ namespace ShapeEditor
         //    var visual = _allShapeVisuals.FirstOrDefault(v => v.Tag == shape);
         //    if (visual == null) return;
 
-        //    if (shape is CompoundShape)
+        //    if (shape is ICompoundShape)
         //    {
         //        // Для группы используем обычный bounding box
         //        ShowBoundingBox(visual);
@@ -3891,7 +3917,7 @@ namespace ShapeEditor
             writer.WriteStartObject();
             foreach (var prop in savedRoot.EnumerateObject())
             {
-                if (shape is CompoundShape compound
+                if (shape is ICompoundShape compound
                     && prop.Name == "childShapes"
                     && visual != null)
                 {
@@ -3928,8 +3954,8 @@ namespace ShapeEditor
                 writer.WriteNumber("worldY", anchorWorld.Y);
             }
 
-            if (shape is EllipseShape ellipse && visual != null)
-                WriteEllipseFocusRelativeToAnchorForPersistence(writer, ellipse, anchorWorld);
+            if (shape is IEllipseShape && visual != null)
+                WriteEllipseFocusRelativeToAnchorForPersistence(writer, shape, anchorWorld);
 
             writer.WriteEndObject();
         }
@@ -3948,7 +3974,7 @@ namespace ShapeEditor
         /// <summary>
         /// Центр эллипса в мировых координатах из якоря — согласован с EllipseShape.Build (орбитальное смещение).
         /// </summary>
-        private static Point GetEllipseCenterWorldForPersistence(EllipseShape ellipse, Point anchorWorld)
+        private static Point GetEllipseCenterWorldForPersistence(ShapeBase ellipse, Point anchorWorld)
         {
             double angleRad = ellipse.Angle * Math.PI / 180.0;
             double cos = Math.Cos(angleRad);
@@ -3963,10 +3989,12 @@ namespace ShapeEditor
         /// <summary>
         /// Записывает focusWorld: позиции фокусов как смещения от якоря фигуры (в тех же мировых осях, что и worldX/worldY).
         /// </summary>
-        private static void WriteEllipseFocusRelativeToAnchorForPersistence(Utf8JsonWriter writer, EllipseShape ellipse, Point anchorWorld)
+        private static void WriteEllipseFocusRelativeToAnchorForPersistence(Utf8JsonWriter writer, ShapeBase ellipse, Point anchorWorld)
         {
             var centerWorld = GetEllipseCenterWorldForPersistence(ellipse, anchorWorld);
-            var (f1, f2) = ellipse.GetGlobalFocusPositions(centerWorld.X, centerWorld.Y);
+            if (ellipse is not IEllipseShape e)
+                return;
+            var (f1, f2) = e.GetGlobalFocusPositions(centerWorld.X, centerWorld.Y);
 
             writer.WritePropertyName("focusWorld");
             writer.WriteStartObject();
@@ -4000,12 +4028,12 @@ namespace ShapeEditor
         {
             var data = new JsonShapeData
             {
-                type = (s is PolygonShape ps && ps.IsCustomSegmentShape) ? "CustomShape" : s.GetType().Name,
+                type = (s is IPolygonShape ps && ps.IsCustomSegmentShape) ? "CustomShape" : s.GetType().Name,
                 id = s.Id,
                 // Получаем мировую позицию якоря
-                worldX = (s is CompoundShape || _allShapes.Contains(s)) ?
+                worldX = (s is ICompoundShape || _allShapes.Contains(s)) ?
                           s.GetAnchorWorldPosition(_allShapeVisuals[Array.IndexOf(_allShapes, s)]).X : 0,
-                worldY = (s is CompoundShape || _allShapes.Contains(s)) ?
+                worldY = (s is ICompoundShape || _allShapes.Contains(s)) ?
                           s.GetAnchorWorldPosition(_allShapeVisuals[Array.IndexOf(_allShapes, s)]).Y : 0,
                 scale = s.Scale,
                 angle = s.Angle,
@@ -4019,7 +4047,7 @@ namespace ShapeEditor
             };
 
             // Специфика CustomShape-like polygon (segment-driven)
-            if (s is PolygonShape cs && cs.IsCustomSegmentShape)
+            if (s is IPolygonShape cs && cs.IsCustomSegmentShape)
             {
                 data.isClosed = cs.IsClosed;
                 data.initialDirection = cs.InitialDirection;
@@ -4036,7 +4064,7 @@ namespace ShapeEditor
             }
 
             // Специфика CompoundShape (рекурсия)
-            if (s is CompoundShape compound)
+            if (s is ICompoundShape compound)
             {
                 data.children = compound.ChildShapes.Select(child => MapShapeToData(child)).ToList();
             }
@@ -4139,11 +4167,11 @@ namespace ShapeEditor
             if (data.edgeLocks != null) shape.EdgeLengthLocked = new List<bool>(data.edgeLocks);
 
             // 2. Специфика CustomShape-like (segment-driven) polygon
-            if (shape is PolygonShape cs && cs.IsCustomSegmentShape && data.segments != null)
+            if (shape is IPolygonShape cs && cs.IsCustomSegmentShape && data.segments != null)
             {
                 cs.IsClosed = data.isClosed;
                 cs.InitialDirection = data.initialDirection;
-                cs.Segments = data.segments.Select(sd => new PolygonShape.CustomSegment
+                cs.Segments = data.segments.Select(sd => new PolygonCustomSegment
                 {
                     Name = sd.name,
                     Length = sd.length,
@@ -4160,7 +4188,7 @@ namespace ShapeEditor
             }
 
             // 3. Специфика CompoundShape (Рекурсия)
-            if (shape is CompoundShape compound && data.children != null)
+            if (shape is ICompoundShape compound && data.children != null)
             {
                 foreach (var childData in data.children)
                 {
@@ -4187,7 +4215,7 @@ namespace ShapeEditor
         private void LoadShapeFromJson(ShapeBase shape, JsonShapeData data)
         {
             // Рекурсивная загрузка для детей составной фигуры
-            if (shape is CompoundShape compound && data.children != null)
+            if (shape is ICompoundShape compound && data.children != null)
             {
                 foreach (var childData in data.children)
                 {
@@ -4216,14 +4244,15 @@ namespace ShapeEditor
         /// <summary>
         /// Предварительно строит детей составной фигуры, чтобы вычислились их границы
         /// </summary>
-        private void PreBuildCompoundChildren(CompoundShape compound)
+        private void PreBuildCompoundChildren(ShapeBase compound)
         {
-            foreach (var child in compound.ChildShapes)
+            var group = (ICompoundShape)compound;
+            foreach (var child in group.ChildShapes)
             {
                 // Рекурсивно для вложенных групп
-                if (child is CompoundShape childCompound)
+                if (child is ICompoundShape childCompound)
                 {
-                    PreBuildCompoundChildren(childCompound);
+                    PreBuildCompoundChildren((ShapeBase)childCompound);
                 }
 
                 // Строим ребенка в (0,0) - это вычислит его MinX, MinY, MaxX, MaxY
@@ -4248,22 +4277,11 @@ namespace ShapeEditor
         //    };
         //}
 
-        private ShapeBase CreateShapeByType(string typeName)
+        private ShapeBase? CreateShapeByType(string? typeName)
         {
-            return typeName switch
-            {
-                "PolygonShape" => new PolygonShape(),
-                "EllipseShape" => new EllipseShape(),
-                "CustomShape" => new PolygonShape { IsCustomSegmentShape = true },
-                "CompoundShape" => new CompoundShape(),
-                // Обратная совместимость со старыми файлами
-                "RectangleShape" => PolygonShape.CreateRectangle(),
-                "TriangleShape" => PolygonShape.CreateTriangle(),
-                "TrapezoidShape" => PolygonShape.CreateTrapezoid(),
-                "CircleShape" => new EllipseShape { IsCircle = true, MajorAxis = 100 },
-                "HexagonShape" => PolygonShape.CreateHexagon(),
-                _ => null
-            };
+            if (string.IsNullOrEmpty(typeName))
+                return null;
+            return ShapePluginContext.Factory?.TryCreate(typeName);
         }
 
         private void SkipShapeData(BinaryReader reader)
@@ -4313,7 +4331,7 @@ namespace ShapeEditor
             UpdateParamsPanelVisibility();
         }
 
-        public static bool IsHighlightedChild(CompoundShape parent, ShapeBase child)
+        public static bool IsHighlightedChildStatic(ShapeBase parent, ShapeBase child)
         {
             var main = (MainWindow)Application.Current.MainWindow;
 
@@ -4342,7 +4360,7 @@ namespace ShapeEditor
         //private void Focus_Down(object sender, MouseButtonEventArgs e)
         //{
         //    if (sender is not Ellipse ellipse) return;
-        //    if (ellipse.Parent is not Canvas shapeCanvas || shapeCanvas.Tag is not EllipseShape ellipseShape) return;
+        //    if (ellipse.Parent is not Canvas shapeCanvas || shapeCanvas.Tag is not IEllipseShape ellipseShape) return;
 
         //    _currentShape = ellipseShape;
         //    _currentShapeVisual = shapeCanvas;
@@ -4359,7 +4377,7 @@ namespace ShapeEditor
 
         //private void Focus_Move(object sender, MouseEventArgs e)
         //{
-        //    if (!_draggingFocus || _currentShape is not EllipseShape ellipseShape || _currentShapeVisual == null) return;
+        //    if (!_draggingFocus || _currentShape is not IEllipseShape ellipseShape || _currentShapeVisual == null) return;
         //    if (_isProcessingMove) return;
         //    _isProcessingMove = true;
 
@@ -4489,19 +4507,15 @@ namespace ShapeEditor
                     return;
                 }
 
-                string typeName = typeProp.GetString();
-                ShapeBase shape = typeName switch
-                {
-                    "PolygonShape" => new PolygonShape(),
-                    "EllipseShape" => new EllipseShape(),
-                    "CustomShape" => new PolygonShape { IsCustomSegmentShape = true },
-                    "CompoundShape" => new CompoundShape(),
-                    _ => null
-                };
+                string? typeName = typeProp.GetString();
+                ShapeBase? shape = CreateShapeByType(typeName);
 
                 if (shape == null)
                 {
-                    MessageBox.Show($"Неизвестный тип фигуры: {typeName}", "Ошибка",
+                    string reason = ShapePluginContext.Factory == null
+                        ? "Плагин ShapesLibrary.dll не загружен."
+                        : $"Неизвестный тип фигуры: {typeName}";
+                    MessageBox.Show(reason, "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
@@ -4582,7 +4596,7 @@ namespace ShapeEditor
             var children = new List<object>();
 
             // Если фигура — группа (CompoundShape), рекурсивно добавляем её детей
-            if (shape is CompoundShape compound)
+            if (shape is ICompoundShape compound)
             {
                 foreach (var child in compound.ChildShapes)
                 {

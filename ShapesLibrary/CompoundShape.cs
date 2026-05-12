@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -7,13 +7,13 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Text.Json;
 
-namespace ShapeEditor
+namespace ShapeEditor;
+
+/// <summary>
+/// Составная фигура (группа). Содержит дочерние фигуры любого типа.
+/// </summary>
+public class CompoundShape : ShapeBase, ICompoundShape
 {
-    /// <summary>
-    /// Составная фигура (группа). Содержит дочерние фигуры любого типа.
-    /// </summary>
-    public class CompoundShape : ShapeBase
-    {
         public List<ShapeBase> ChildShapes { get; set; } = new();
 
         /// <summary>
@@ -35,7 +35,7 @@ namespace ShapeEditor
 
         public void AddChildShape(ShapeBase child)
         {
-            if (child == null || child is CompoundShape || ChildShapes.Contains(child))
+            if (child == null || child is ICompoundShape || ChildShapes.Contains(child))
                 return;
             ChildShapes.Add(child);
             if (!ChildAnchorOffsets.ContainsKey(child.Id))
@@ -80,7 +80,7 @@ namespace ShapeEditor
 
             foreach (var child in ChildShapes)
             {
-                if (child is CompoundShape childCompound)
+                if (child is ICompoundShape childCompound)
                     childCompound.RecalculateBounds();
 
                 var offset = GetChildAnchorOffsetOrFallback(child);
@@ -134,8 +134,8 @@ namespace ShapeEditor
                 Canvas.SetTop(childVisual, offsetY);
 
                 // Управление видимостью якорей детей
-                bool isEditingThis = MainWindow.IsEditingThisChild(this, child);
-                bool isHighlightedFromTree = MainWindow.IsHighlightedChild(this, child);
+                bool isEditingThis = CompoundShapeHost.IsEditingThisChild?.Invoke(this, child) == true;
+                bool isHighlightedFromTree = CompoundShapeHost.IsHighlightedChild?.Invoke(this, child) == true;
 
                 // Теперь ищем не только "Anchor", но и "Focus1", "Focus2"
                 foreach (var sub in childVisual.Children.OfType<Ellipse>())
@@ -256,8 +256,9 @@ namespace ShapeEditor
                     if (!childElement.TryGetProperty("type", out var typeProp))
                         continue;
 
-                    string typeName = typeProp.GetString();
-                    ShapeBase child = CreateShapeByType(typeName);
+                    string? typeName = typeProp.GetString();
+                    if (string.IsNullOrEmpty(typeName)) continue;
+                    ShapeBase? child = CreateShapeByType(typeName);
                     if (child != null)
                     {
                         child.LoadFromJson(childElement);
@@ -286,7 +287,7 @@ namespace ShapeEditor
         /// </summary>
         private static void PreBuildChild(ShapeBase child)
         {
-            if (child is CompoundShape compound)
+            if (child is ICompoundShape compound)
             {
                 // Рекурсивно для вложенных групп
                 foreach (var grandChild in compound.ChildShapes)
@@ -303,18 +304,10 @@ namespace ShapeEditor
         /// <summary>
         /// Фабрика создания фигур по типу (для десериализации)
         /// </summary>
-        private static ShapeBase CreateShapeByType(string typeName)
+        private static ShapeBase? CreateShapeByType(string typeName)
         {
-            return typeName switch
-            {
-                "PolygonShape" => new PolygonShape(),
-                "EllipseShape" => new EllipseShape(),
-                "CustomShape" => new PolygonShape { IsCustomSegmentShape = true },
-                "CompoundShape" => new CompoundShape(),
-                _ => null
-            };
+            return ShapePluginContext.Factory?.TryCreate(typeName);
         }
 
         #endregion
-    }
 }
