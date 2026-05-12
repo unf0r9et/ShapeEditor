@@ -14,6 +14,7 @@ namespace ShapeEditor
     /// Большая ось определяется автоматически: max(_axisX, _axisY)
     /// Фокусы всегда на большей оси.
     /// </summary>
+    [ExportedShape("EllipseShape")]
     public class EllipseShape : ShapeBase, IEllipseShape
     {
         public int ApproximationPoints { get; set; } = 60;

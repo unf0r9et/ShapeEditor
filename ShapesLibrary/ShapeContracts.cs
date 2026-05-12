@@ -47,7 +47,7 @@ public interface IShapeView
     void SaveToFile(string filename);
 }
 
-/// <summary>Создаёт экземпляры фигур по строковому имени типа из JSON (реализация в ShapesLibrary).</summary>
+/// <summary>Создаёт экземпляры фигур по строковому имени из JSON; типы задаются атрибутом <see cref="ExportedShapeAttribute"/> в загружаемой сборке.</summary>
 public interface IShapeFactory
 {
     ShapeBase? TryCreate(string persistedTypeName);
@@ -55,7 +55,7 @@ public interface IShapeFactory
     ShapeBase Create(string persistedTypeName);
 }
 
-/// <summary>Set by <see cref="ShapeLoader"/> after the shapes plugin loads.</summary>
+/// <summary>Set by <see cref="ShapeLoader.AddLibrary"/> after a shapes assembly is registered.</summary>
 public static class ShapePluginContext
 {
     public static IShapeFactory? Factory { get; set; }

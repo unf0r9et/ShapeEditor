@@ -29,4 +29,13 @@
 	<PackageReference Include="System.Windows.Forms" Version="2.4" />
   </ItemGroup>
 
+  <Target Name="CopyShapesPlugin" AfterTargets="Build">
+    <PropertyGroup>
+      <_ShapesLibDll>$(MSBuildThisFileDirectory)..\ShapesLibrary\bin\$(Configuration)\net9.0-windows7.0\ShapesLibrary.dll</_ShapesLibDll>
+    </PropertyGroup>
+    <MakeDir Directories="$(OutputPath)plugins" />
+    <Copy SourceFiles="$(_ShapesLibDll)" DestinationFolder="$(OutputPath)plugins" SkipUnchangedFiles="true" Condition="Exists('$(_ShapesLibDll)')" />
+    <Copy SourceFiles="$(_ShapesLibDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(_ShapesLibDll)')" />
+  </Target>
+
 </Project>

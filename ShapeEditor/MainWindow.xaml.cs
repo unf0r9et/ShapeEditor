@@ -4502,7 +4502,7 @@ namespace ShapeEditor
                 if (shape == null)
                 {
                     string reason = ShapePluginContext.Factory == null
-                        ? "Плагин ShapesLibrary.dll не загружен."
+                        ? "Сборка фигур (ShapesLibrary.dll) не загружена или фабрика не инициализирована."
                         : $"Неизвестный тип фигуры: {typeName}";
                     MessageBox.Show(reason, "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);

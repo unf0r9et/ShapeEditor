@@ -15,6 +15,7 @@ namespace ShapeEditor
     /// Базовый класс для всех многоугольников.
     /// Через него строятся: прямоугольники, треугольники, трапеции, шестиугольники, произвольные многоугольники.
     /// </summary>
+    [ExportedShape("PolygonShape")]
     public class PolygonShape : ShapeBase, IPolygonShape
     {
         private string? _displayNameRuOverride;
@@ -421,11 +422,10 @@ namespace ShapeEditor
             return anchorShift;
         }
 
-        // ==================== ФАБРИЧНЫЕ МЕТОДЫ ====================
+        // ==================== ФАБРИЧНЫЕ МЕТОДЫ / ИНИЦИАЛИЗАТОРЫ ПРЕСЕТОВ ====================
 
-        public static PolygonShape CreateRectangle(double width = 120, double height = 80)
+        internal static void InitializeAsRectangle(PolygonShape shape, double width = 120, double height = 80)
         {
-            var shape = new PolygonShape(4);
             shape._displayNameRuOverride = "Прямоугольник";
             shape._sideNamesOverride = new[] { "Верхняя", "Правая", "Нижняя", "Левая" };
             double halfW = width / 2.0, halfH = height / 2.0;
@@ -434,12 +434,10 @@ namespace ShapeEditor
                 new Point(-halfW, -halfH), new Point(halfW, -halfH),
                 new Point(halfW, halfH), new Point(-halfW, halfH)
             };
-            return shape;
         }
 
-        public static PolygonShape CreateTriangle(double baseWidth = 120, double height = 100)
+        internal static void InitializeAsTriangle(PolygonShape shape, double baseWidth = 120, double height = 100)
         {
-            var shape = new PolygonShape(3);
             shape._displayNameRuOverride = "Треугольник";
             shape._sideNamesOverride = new[] { "Правая", "Нижняя", "Левая" };
             double halfW = baseWidth / 2.0, halfH = height / 2.0;
@@ -447,12 +445,10 @@ namespace ShapeEditor
             {
                 new Point(0, -halfH), new Point(halfW, halfH), new Point(-halfW, halfH)
             };
-            return shape;
         }
 
-        public static PolygonShape CreateTrapezoid(double topWidth = 80, double bottomWidth = 140, double height = 80)
+        internal static void InitializeAsTrapezoid(PolygonShape shape, double topWidth = 80, double bottomWidth = 140, double height = 80)
         {
-            var shape = new PolygonShape(4);
             shape._displayNameRuOverride = "Трапеция";
             shape._sideNamesOverride = new[] { "Верхняя", "Правая боковая", "Нижняя", "Левая боковая" };
             double halfTop = topWidth / 2.0, halfBot = bottomWidth / 2.0, halfH = height / 2.0;
@@ -461,12 +457,10 @@ namespace ShapeEditor
                 new Point(-halfTop, -halfH), new Point(halfTop, -halfH),
                 new Point(halfBot, halfH), new Point(-halfBot, halfH)
             };
-            return shape;
         }
 
-        public static PolygonShape CreateHexagon(double radius = 60)
+        internal static void InitializeAsHexagon(PolygonShape shape, double radius = 60)
         {
-            var shape = new PolygonShape(6);
             shape._displayNameRuOverride = "Шестиугольник";
             shape._sideNamesOverride = new[] { "Верхняя правая", "Правая", "Нижняя правая", "Нижняя левая", "Левая", "Верхняя левая" };
             var verts = new Point[6];
@@ -476,6 +470,33 @@ namespace ShapeEditor
                 verts[i] = new Point(radius * Math.Cos(angle), radius * Math.Sin(angle));
             }
             shape.Vertices = verts;
+        }
+
+        public static PolygonShape CreateRectangle(double width = 120, double height = 80)
+        {
+            var shape = new PolygonShape(4);
+            InitializeAsRectangle(shape, width, height);
+            return shape;
+        }
+
+        public static PolygonShape CreateTriangle(double baseWidth = 120, double height = 100)
+        {
+            var shape = new PolygonShape(3);
+            InitializeAsTriangle(shape, baseWidth, height);
+            return shape;
+        }
+
+        public static PolygonShape CreateTrapezoid(double topWidth = 80, double bottomWidth = 140, double height = 80)
+        {
+            var shape = new PolygonShape(4);
+            InitializeAsTrapezoid(shape, topWidth, bottomWidth, height);
+            return shape;
+        }
+
+        public static PolygonShape CreateHexagon(double radius = 60)
+        {
+            var shape = new PolygonShape(6);
+            InitializeAsHexagon(shape, radius);
             return shape;
         }
 

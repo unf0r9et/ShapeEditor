@@ -11,7 +11,7 @@ namespace ShapeEditor;
 
 /// <summary>
 /// Абстрактный базовый класс для всех фигур редактора.
-/// Конкретные типы фигур реализованы в сборке ShapesLibrary.
+/// Конкретные типы фигур находятся в сборке ShapesLibrary (одна библиотека классов).
 /// </summary>
 public abstract class ShapeBase
 {
@@ -481,7 +481,7 @@ public abstract class ShapeBase
     public static ShapeBase LoadFromFile(string filename)
     {
         if (ShapePluginContext.Factory == null)
-            throw new InvalidOperationException("Фигуры не готовы: вызовите ShapeLoader.TryLoadShapesPlugin() перед загрузкой из файла.");
+            throw new InvalidOperationException("Фигуры не готовы: загрузите сборку фигур (ShapeLoader.DllOpen / AddLibrary или TryLoadShapesPlugin).");
 
         string jsonString = File.ReadAllText(filename);
         using var doc = JsonDocument.Parse(jsonString);

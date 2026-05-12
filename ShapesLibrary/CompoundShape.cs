@@ -12,6 +12,7 @@ namespace ShapeEditor;
 /// <summary>
 /// Составная фигура (группа). Содержит дочерние фигуры любого типа.
 /// </summary>
+[ExportedShape("CompoundShape")]
 public class CompoundShape : ShapeBase, ICompoundShape
 {
         public List<ShapeBase> ChildShapes { get; set; } = new();
