@@ -795,7 +795,7 @@ namespace ShapeEditor
             }
         }
 
-        private Point GetEllipseCenterWorldFromCurrentVisual(ShapeBase ellipse)
+        private Point GetEllipseCenterWorldFromCurrentVisual(IEllipseShape ellipse)
         {
             Point anchorWorld = ellipse.GetAnchorWorldPosition(_currentShapeVisual);
             double angleRad = ellipse.Angle * Math.PI / 180.0;
@@ -1349,7 +1349,7 @@ namespace ShapeEditor
             }
 
             // Добавлено: блок для режима создания кастомной фигуры
-            if (_currentShape is IPolygonShape sc && sc.IsCustomSegmentShape && _isCreatingCustomShape && sc == _creatingCustomShape)
+            if (_currentShape is IPolygonShape sc && sc.IsCustomSegmentShape && _isCreatingCustomShape && ReferenceEquals(sc, _creatingCustomShape))
             {
                 _paramsStackPanel.Children.Add(new TextBlock
                 {
@@ -1446,7 +1446,7 @@ namespace ShapeEditor
                         ToolTip = $"Тип: {child.GetType().Name}\nГлобальный ID: {child.Id}"
                     };
 
-                    nameBtn.Click += (s, e) => { HighlightChildInCompound(compound, index); };
+                    nameBtn.Click += (s, e) => { HighlightChildInCompound((ShapeBase)compound, index); };
 
                     // Кнопка редактирования
                     var editBtn = new Button
@@ -1459,7 +1459,7 @@ namespace ShapeEditor
                         FontSize = 14,
                         Cursor = Cursors.Hand
                     };
-                    editBtn.Click += (s, e) => { StartEditingChild(compound, child); };
+                    editBtn.Click += (s, e) => { StartEditingChild((ShapeBase)compound, child); };
 
                     // Кнопка извлечения (не удаления!)
                     var delBtn = new Button
@@ -2825,53 +2825,46 @@ namespace ShapeEditor
         private void OnSetNewSegment(object? sender, RoutedEventArgs e)
         {
             if (!_isCreatingCustomShape || _creatingCustomShape == null) return;
+            if (_creatingCustomShape is not IPolygonShape poly) return;
             if (!double.TryParse(_newSegmentLengthBox?.Text, out double length) || length <= 0) return;
             if (!double.TryParse(_newSegmentAngleBox?.Text, out double angle)) angle = 0;
 
-            if (_creatingCustomShape.Segments.Count == 0)
+            if (poly.Segments.Count == 0)
             {
-                // первый сегмент: угол задаёт направление этого сегмента (InitialDirection)
-                _creatingCustomShape.InitialDirection = angle;
-                _creatingCustomShape.AddSegment(length, 0); // пока angleToNext = 0
+                poly.InitialDirection = angle;
+                poly.AddSegment(length, 0);
             }
             else
             {
-                // угол вводится как угол текущего сегмента относительно предыдущего,
-                // это означает: previous.AngleToNext = angle
-                int prevIdx = _creatingCustomShape.Segments.Count - 1;
-                _creatingCustomShape.Segments[prevIdx].AngleToNext = angle;
-                // добавляем новый сегмент (её AngleToNext пока 0)
-                _creatingCustomShape.AddSegment(length, 0);
+                int prevIdx = poly.Segments.Count - 1;
+                poly.Segments[prevIdx].AngleToNext = angle;
+                poly.AddSegment(length, 0);
             }
 
-            // Обеспечиваем списки цветов/толщин и синхронизируем в сегменте
-            while (_creatingCustomShape.SideColors.Count < _creatingCustomShape.Segments.Count)
+            while (_creatingCustomShape.SideColors.Count < poly.Segments.Count)
                 _creatingCustomShape.SideColors.Add(Brushes.Black);
-            while (_creatingCustomShape.SideThickness.Count < _creatingCustomShape.Segments.Count)
+            while (_creatingCustomShape.SideThickness.Count < poly.Segments.Count)
                 _creatingCustomShape.SideThickness.Add(3.0);
-            var lastIdx = _creatingCustomShape.Segments.Count - 1;
-            _creatingCustomShape.Segments[lastIdx].Color = _creatingCustomShape.SideColors[lastIdx];
-            _creatingCustomShape.Segments[lastIdx].Thickness = _creatingCustomShape.SideThickness[lastIdx];
+            var lastIdx = poly.Segments.Count - 1;
+            poly.Segments[lastIdx].Color = _creatingCustomShape.SideColors[lastIdx];
+            poly.Segments[lastIdx].Thickness = _creatingCustomShape.SideThickness[lastIdx];
 
-            // Обновляем визуал и подсветку последнего сегмента
-            // Сохраняем центр якоря: при создании AnchorPoint оставляем в (0,0), а CreateShapeVisual при создании
-            // уже выставлял визуал в центр экрана. После добавления сегментов RedrawPreservingAnchor сохранит позицию.
             RedrawPreservingAnchor();
-            UpdateCustomSegmentHighlight(_creatingCustomShape.Segments.Count - 1);
+            UpdateCustomSegmentHighlight(poly.Segments.Count - 1);
 
-            _creatingNextIndex = _creatingCustomShape.Segments.Count;
+            _creatingNextIndex = poly.Segments.Count;
         }
 
         private void OnCloseCreatingShape(object? sender, RoutedEventArgs e)
         {
             if (!_isCreatingCustomShape || _creatingCustomShape == null) return;
-            if (_creatingCustomShape.Segments.Count < 2)
+            if (_creatingCustomShape is not IPolygonShape poly) return;
+            if (poly.Segments.Count < 2)
             {
                 MessageBox.Show("Нужно как минимум 2 отрезка, чтобы замкнуть фигуру.");
                 return;
             }
 
-            // Пересчитываем вершины и берём первую/последнюю
             var verts = _creatingCustomShape.Vertices;
             if (verts.Length < 2) return;
             Point first = verts[0];
@@ -2888,10 +2881,9 @@ namespace ShapeEditor
                 return;
             }
 
-            // Получаем направление последнего сегмента
-            double currentAngle = _creatingCustomShape.InitialDirection;
-            for (int i = 0; i < _creatingCustomShape.Segments.Count - 1; i++)
-                currentAngle += _creatingCustomShape.Segments[i].AngleToNext;
+            double currentAngle = poly.InitialDirection;
+            for (int i = 0; i < poly.Segments.Count - 1; i++)
+                currentAngle += poly.Segments[i].AngleToNext;
 
             double lastDirRad = currentAngle * Math.PI / 180.0;
             Vector lastDir = new Vector(Math.Cos(lastDirRad), Math.Sin(lastDirRad));
@@ -2904,29 +2896,25 @@ namespace ShapeEditor
             double cross = lastDir.X * targetDir.Y - lastDir.Y * targetDir.X;
             if (cross < 0) ang = -ang;
 
-            // Устанавливаем угол поворота ПОСЛЕ последнего существующего сегмента
-            int lastSegIdx = _creatingCustomShape.Segments.Count - 1;
-            _creatingCustomShape.Segments[lastSegIdx].AngleToNext = ang;
+            int lastSegIdx = poly.Segments.Count - 1;
+            poly.Segments[lastSegIdx].AngleToNext = ang;
 
-            // Добавляем последний (замыкающий) сегмент длиной len
-            _creatingCustomShape.AddSegment(len, 0);
-            _creatingCustomShape.IsClosed = true;
+            poly.AddSegment(len, 0);
+            poly.IsClosed = true;
 
-            // Синхронизируем цвета/толщины
-            while (_creatingCustomShape.SideColors.Count < _creatingCustomShape.Segments.Count)
+            while (_creatingCustomShape.SideColors.Count < poly.Segments.Count)
                 _creatingCustomShape.SideColors.Add(Brushes.Black);
-            while (_creatingCustomShape.SideThickness.Count < _creatingCustomShape.Segments.Count)
+            while (_creatingCustomShape.SideThickness.Count < poly.Segments.Count)
                 _creatingCustomShape.SideThickness.Add(3.0);
-            for (int i = 0; i < _creatingCustomShape.Segments.Count; i++)
+            for (int i = 0; i < poly.Segments.Count; i++)
             {
-                _creatingCustomShape.Segments[i].Color = _creatingCustomShape.SideColors[i];
-                _creatingCustomShape.Segments[i].Thickness = _creatingCustomShape.SideThickness[i];
+                poly.Segments[i].Color = _creatingCustomShape.SideColors[i];
+                poly.Segments[i].Thickness = _creatingCustomShape.SideThickness[i];
             }
 
-            // Центрируем якорь фигуры по её локальным границам
             var worldAnchor = _creatingCustomShape.GetAnchorWorldPosition(_currentShapeVisual);
-            _creatingCustomShape.CenterAnchorToBounds();
-            _creatingCustomShape.IsClosed = true;
+            poly.CenterAnchorToBounds();
+            poly.IsClosed = true;
 
             // Удаляем из холста любые существующие Canvas, связанные с этой моделью (чтобы избежать дубликата)
             var existing = DrawCanvas.Children.OfType<Canvas>().Where(c => ReferenceEquals(c.Tag, _creatingCustomShape)).ToList();
@@ -4114,8 +4102,8 @@ namespace ShapeEditor
                         if (!shapeData.TryGetProperty("type", out var typeProp))
                             continue;
 
-                        string typeName = typeProp.GetString();
-                        ShapeBase shape = CreateShapeByType(typeName);
+                        string? typeName = typeProp.GetString();
+                        ShapeBase? shape = CreateShapeByType(typeName);
                         if (shape == null) continue;
 
                         shape.LoadFromJson(shapeData);
@@ -4138,7 +4126,7 @@ namespace ShapeEditor
                 var jsonFile = JsonSerializer.Deserialize<JsonShapeFile>(jsonString);
                 foreach (var shapeData in jsonFile.shapes)
                 {
-                    ShapeBase shape = RestoreShapeFromData(shapeData);
+                    ShapeBase? shape = RestoreShapeFromData(shapeData);
                     if (shape == null) continue;
 
                     var visual = CreateShapeVisual(shape, shapeData.worldX, shapeData.worldY);
@@ -4150,9 +4138,9 @@ namespace ShapeEditor
             RefreshShapesTree();
         }
 
-        private ShapeBase RestoreShapeFromData(JsonShapeData data)
+        private ShapeBase? RestoreShapeFromData(JsonShapeData data)
         {
-            ShapeBase shape = CreateShapeByType(data.type);
+            ShapeBase? shape = CreateShapeByType(data.type);
             if (shape == null) return null;
 
             // 1. Базовые свойства
@@ -4219,7 +4207,8 @@ namespace ShapeEditor
             {
                 foreach (var childData in data.children)
                 {
-                    ShapeBase child = CreateShapeByType(childData.type);
+                    ShapeBase? child = CreateShapeByType(childData.type);
+                    if (child == null) continue;
                     LoadShapeFromJson(child, childData);
                     compound.AddChildShape(child);
                 }

@@ -1,9 +1,51 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 
 namespace ShapeEditor;
+
+/// <summary>
+/// Общие члены ShapeBase, доступные через интерфейсы фигур.
+/// Реализуется автоматически любым типом, унаследованным от <see cref="ShapeBase"/>.
+/// </summary>
+public interface IShapeView
+{
+    int Id { get; set; }
+    int SidesCount { get; }
+    string DisplayNameRu { get; }
+    string DisplayNameEn { get; }
+    string[] SideNames { get; }
+
+    double Scale { get; set; }
+    double Angle { get; set; }
+    Point AnchorPoint { get; set; }
+    Brush Fill { get; set; }
+    Point[] Vertices { get; set; }
+
+    double MinX { get; }
+    double MinY { get; }
+    double MaxX { get; }
+    double MaxY { get; }
+
+    List<Brush> SideColors { get; set; }
+    List<double> SideThickness { get; set; }
+    List<bool> EdgeLengthLocked { get; set; }
+
+    Point GetAnchorWorldPosition(Canvas canvas);
+    (Point bottomLeft, Point topRight) GetBoundingBoxCorners(Canvas canvas);
+    Canvas Build(double anchorWorldX, double anchorWorldY);
+    bool IsPointInside(Point localPoint);
+    Point SnapToEdgeCenter(Point point);
+    double GetEdgeLength(int edgeIndex);
+    void SetEdgeLength(int edgeIndex, double newLength);
+    bool TrySetEdgeLengths(double[] lengths);
+    void SaveToJson(Utf8JsonWriter writer);
+    void LoadFromJson(JsonElement element);
+    void SaveToFile(string filename);
+}
 
 /// <summary>Creates concrete shapes from persisted JSON type names (implemented by the dynamically loaded plugin).</summary>
 public interface IShapeFactory
@@ -63,7 +105,7 @@ public sealed class PolygonCustomSegment
     }
 }
 
-public interface IEllipseShape
+public interface IEllipseShape : IShapeView
 {
     bool IsCircle { get; set; }
     double MajorAxis { get; set; }
@@ -76,7 +118,7 @@ public interface IEllipseShape
     (Point f1, Point f2) GetGlobalFocusPositions(double centerWorldX, double centerWorldY);
 }
 
-public interface IPolygonShape
+public interface IPolygonShape : IShapeView
 {
     bool IsCustomSegmentShape { get; set; }
     double InitialDirection { get; set; }
@@ -94,7 +136,7 @@ public interface IPolygonShape
     Vector CenterAnchorToBounds();
 }
 
-public interface ICompoundShape
+public interface ICompoundShape : IShapeView
 {
     List<ShapeBase> ChildShapes { get; }
     Dictionary<int, Point> ChildAnchorOffsets { get; }
