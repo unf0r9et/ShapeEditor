@@ -47,7 +47,7 @@ namespace ShapeEditor
 
         // Уникальный числовой ID (присваивается при создании)
         public int Id { get; set; }
-
+        public virtual string DisplayNameEn => "Shape";
         public virtual string[] SideNames
         {
             get
@@ -473,7 +473,9 @@ namespace ShapeEditor
                 Fill = Brushes.White,
                 Stroke = Brushes.Purple,
                 StrokeThickness = 1,
-                Tag = "Anchor"
+                Tag = "Anchor",
+                Visibility = Visibility.Collapsed 
+
             };
             Canvas.SetLeft(anchorDot, anchorLocalX - minX - 5);
             Canvas.SetTop(anchorDot, anchorLocalY - minY - 5);
@@ -548,7 +550,7 @@ namespace ShapeEditor
             {
                 "PolygonShape" => new PolygonShape(),
                 "EllipseShape" => new EllipseShape(),
-                "CustomShape" => new CustomShape(),
+                "CustomShape" => new PolygonShape { IsCustomSegmentShape = true },
                 "CompoundShape" => new CompoundShape(),
                 _ => throw new InvalidDataException($"Неизвестный тип фигуры: {typeName}")
             };
